@@ -71,6 +71,8 @@ cdef extern from "parameter.h":
         ParameterDatum(const ParameterDatum&)
 
 cdef extern from "node_collection.h":
+    cppclass NodeCollectionPTR:
+        NodeCollectionPTR()
     cppclass NodeCollectionDatum:
         NodeCollectionDatum(const NodeCollectionDatum&)
 
@@ -91,6 +93,15 @@ cdef extern from "nest_datums.h":
         long get_target_thread()
         long get_synapse_model_id()
         long get_port()
+
+    cppclass NodeCollectionDatum:
+        NodeCollectionDatum()
+        NodeCollectionDatum(const NodeCollectionDatum&)
+        NodeCollectionDatum(const NodeCollectionPTR&)
+
+    cppclass NodeCollectionIteratorDatum:
+        NodeCollectionIteratorDatum(const NodeCollectionIteratorDatum&)
+
 
 cdef extern from "arraydatum.h":
     cppclass ArrayDatum:
@@ -134,17 +145,31 @@ cdef extern from "tokenstack.h":
         # Supposed to be used only through the addr_tok macro
         Token* top()
 
-cdef extern from "interpret.h":
-    cppclass SLIInterpreter:
-        SLIInterpreter() except +
-        int execute(const string&) except +
-        TokenStack OStack
+cdef extern from "mpi_manager.h" namespace "nest":
+    cppclass MPIManager:
+        void mpi_finalize( int exitcode ) except +
 
-cdef extern from "neststartup.h":
-    int neststartup(int*, char***, SLIInterpreter&) except +
-    void nestshutdown(int) except +
-    cbool nest_has_mpi4py()
-    void c_set_communicator "set_communicator" (object) with gil
+cdef extern from "kernel_manager.h" namespace "nest":
+    KernelManager& kernel()
+    cppclass KernelManager:
+        KernelManager()
+        void destroy_kernel_manager()
+        MPIManager mpi_manager
+
+cdef extern from "nest.h" namespace "nest":
+    void init_nest( int* argc, char** argv[] )
+    NodeCollectionPTR create( const string model_name, const long n )
+
+cdef extern from "pynestkernel_aux.h":
+    CYTHON_isConnectionGenerator( x )
+    CYTHON_unpackConnectionGeneratorDatum( PyObject* obj )
+    CYTHON_DEREF( x )
+    CYTHON_ADDR( x )
+
+# TODO-PYNEST-NG: Move these from neststartup to mpimanager  
+# cdef extern from "neststartup.h":
+#     cbool nest_has_mpi4py()
+#     void c_set_communicator "set_communicator" (object) with gil
 
 cdef extern from "nest.h" namespace "nest":
     Datum* node_collection_array_index(const Datum* node_collection, const long* array, unsigned long n) except +

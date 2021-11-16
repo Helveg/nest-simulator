@@ -154,31 +154,21 @@ cdef class SLILiteral(object):
 
 cdef class NESTEngine(object):
 
-    cdef SLIInterpreter* pEngine
-
-    def __cinit__(self):
-
-        self.pEngine = NULL
-
     def __dealloc__(self):
 
-        nestshutdown( 0 )
-
-        del self.pEngine
-
-        self.pEngine = NULL
+        kernel().mpi_manager.mpi_finalize( 0 );
+        kernel().destroy_kernel_manager();
 
     def set_communicator(self, comm):
+        pass
         # extract mpi_comm from mpi4py
-        if nest_has_mpi4py():
-            c_set_communicator(comm)
-        else:
-            raise NESTError("set_communicator: "
-                            "NEST not compiled with MPI4PY")
+        # TODO-PYNEST-NG: enable again after moving pertaining functions
+        #if nest_has_mpi4py():
+        #    c_set_communicator(comm)
+        #else:
+        #    raise NESTError("set_communicator: NEST not compiled with MPI4PY")
 
     def init(self, argv):
-        if self.pEngine is not NULL:
-            raise NESTErrors.PyNESTError("engine already initialized")
 
         cdef int argc = <int> len(argv)
         if argc <= 0:
@@ -200,9 +190,13 @@ cdef class NESTEngine(object):
             for i, argvi in enumerate(argv_bytes):
                 argv_chars[i] = argvi # c-string ref extracted
 
-            self.pEngine = new SLIInterpreter()
+            init_nest(&argc, &argv_chars)
 
-            neststartup(&argc, &argv_chars, deref(self.pEngine))
+            # TODO-PYNEST-NG
+            # nest::kernel().model_manager.get_modeldict()
+            # nest::kernel().model_manager.get_synapsedict()
+            # nest::kernel().connection_manager.get_connruledict()
+            # nest::kernel().sp_manager.get_growthcurvedict()
 
             # If using MPI, argv might now have changed, so rebuild it
             del argv[:]
@@ -213,40 +207,7 @@ cdef class NESTEngine(object):
 
         return True
 
-    def run(self, cmd):
-
-        if self.pEngine is NULL:
-            raise NESTErrors.PyNESTError("engine uninitialized")
-        cdef string cmd_bytes
-        cmd_bytes = cmd.encode('utf-8')
-        self.pEngine.execute(cmd_bytes)
-
-    def push(self, obj):
-
-        if self.pEngine is NULL:
-            raise NESTErrors.PyNESTError("engine uninitialized")
-        self.pEngine.OStack.push(python_object_to_datum(obj))
-
-    def pop(self):
-
-        if self.pEngine is NULL:
-            raise NESTErrors.PyNESTError("engine uninitialized")
-
-        if self.pEngine.OStack.empty():
-            raise NESTErrors.PyNESTError("interpreter stack is empty")
-
-        cdef Datum* dat = (addr_tok(self.pEngine.OStack.top())).datum()
-
-        ret = sli_datum_to_object(dat)
-
-        self.pEngine.OStack.pop()
-
-        return ret
-
     def take_array_index(self, node_collection, array):
-        if self.pEngine is NULL:
-            raise NESTErrors.PyNESTError("engine uninitialized")
-
         if not (isinstance(node_collection, SLIDatum) and (<SLIDatum> node_collection).dtype == SLI_TYPE_NODECOLLECTION.decode()):
             raise TypeError('node_collection must be a NodeCollection, got {}'.format(type(node_collection)))
         if not isinstance(array, numpy.ndarray):
@@ -283,8 +244,6 @@ cdef class NESTEngine(object):
 
     def connect_arrays(self, sources, targets, weights, delays, synapse_model, syn_param_keys, syn_param_values):
         """Calls connect_arrays function, bypassing SLI to expose pointers to the NumPy arrays"""
-        if self.pEngine is NULL:
-            raise NESTErrors.PyNESTError("engine uninitialized")
         if not HAVE_NUMPY:
             raise NESTErrors.PyNESTError("NumPy is not available")
 
@@ -628,3 +587,15 @@ cdef inline object sli_vector_to_object(sli_vector_ptr_t dat, vector_value_t _ =
             return numpy.array([], dtype=ret_dtype)
     else:
         return arr
+
+
+################################################################################
+####                                                                        ####
+####                              PyNEST LL API                             ####
+####                                                                        ####
+################################################################################
+
+def llapi_create(string model, long n=1):
+    cdef NodeCollectionPTR gids = create(model, n)
+    return NodeCollection(gids)
+

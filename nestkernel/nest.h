@@ -107,7 +107,7 @@ DictionaryDatum get_node_status( const index node_id );
 void set_connection_status( const ConnectionDatum& conn, const DictionaryDatum& dict );
 DictionaryDatum get_connection_status( const ConnectionDatum& conn );
 
-NodeCollectionPTR create( const Name& model_name, const index n );
+NodeCollectionPTR create( const std::string model_name, const index n );
 
 NodeCollectionPTR get_nodes( const DictionaryDatum& dict, const bool local_only );
 
