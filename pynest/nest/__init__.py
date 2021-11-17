@@ -76,7 +76,7 @@ class NestModule(types.ModuleType):
     from .ll_api import set_communicator
 
     # __version__ = ll_api.sli_func("statusdict /version get")
-    __version__ = "NO SLI"
+    __version__ = "3.2.0"
 
     def __init__(self, module_name):
         super().__init__(module_name)
