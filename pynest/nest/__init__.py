@@ -78,6 +78,8 @@ class NestModule(types.ModuleType):
     # __version__ = ll_api.sli_func("statusdict /version get")
     __version__ = "NO SLI"
 
+    def __init__(self, module_name):
+        super().__init__(module_name)
         # Import public APIs of submodules into the `nest.` namespace
         _rel_import_star(self, ".lib.hl_api_connections")
         _rel_import_star(self, ".lib.hl_api_exceptions")
