@@ -4,6 +4,8 @@ build/
 _build/
 install/
 reports/
+_skbuild/
+*.egg-info/
 
 # compilation artefacts
 pynest/pynestkernel.cxx
@@ -42,7 +44,6 @@ extras/nest-config
 extras/nest_vars.sh
 libnestutil/config.h
 nest/static_modules.h
-pynest/setup.py
 
 # installation artefacts
 install_manifest.txt
