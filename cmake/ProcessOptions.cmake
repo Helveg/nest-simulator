@@ -392,7 +392,7 @@ function( NEST_PROCESS_WITH_PYTHON )
   elseif ( ${with-python} STREQUAL "ON" )
 
     # Localize the Python interpreter and lib/header files
-    find_package( Python 3.8 REQUIRED Interpreter Development )
+    find_package( Python 3.8 REQUIRED Interpreter Development.Module )
 
     if ( Python_FOUND )
       if ( CMAKE_INSTALL_PREFIX_INITIALIZED_TO_DEFAULT )
