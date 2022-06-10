@@ -1,6 +1,5 @@
 [build-system]
 requires = [
-  "setuptools>=42",
   "wheel",
   "scikit-build",
   "cmake",
@@ -12,7 +11,11 @@ build-backend = "setuptools.build_meta"
 [tool.cibuildwheel]
 skip = ["*-musllinux_*", "*cp36*", "*cp37*"]
 archs = "auto64"
-environment = { NEST_CMAKE_BUILDWHEEL="ON" }
+
+[tool.cibuildwheel.environment]
+NEST_CMAKE_BUILDWHEEL="ON"
+CMAKE_ARGS="-DCMAKE_MODULE_PATH=/project/cmake"
+BOOST_ROOT="/boost"
 
 [tool.cibuildwheel.linux]
-before-build = "source extras/wheelbuild/prepare_container.sh"
+before-build = "python3 extras/wheelbuild/prepare_container.py"
