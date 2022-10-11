@@ -243,6 +243,8 @@ function( NEST_PROCESS_STATIC_LIBRARIES )
           "\$ORIGIN/../../${CMAKE_INSTALL_LIBDIR}/nest"
           # for pynestkernel: origin at <prefix>/lib/python3.x/site-packages/nest
           "\$ORIGIN/../../../nest"
+          "\$ORIGIN/${CMAKE_INSTALL_LIBDIR}/nest"
+          "${CMAKE_INSTALL_LIBDIR}/nest"
           PARENT_SCOPE )
     endif ()
 
