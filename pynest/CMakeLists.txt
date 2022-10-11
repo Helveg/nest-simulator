@@ -19,59 +19,75 @@
 
 find_package(Cython)
 
-add_cython_target ( pynestkernel pynestkernel.pyx CXX)
-add_cython_target ( nestkernel_api nestkernel_api.pyx CXX)
+message( STATUS "We are going to check HAVE_PYTHON: ${HAVE_PYTHON}" )
 
-add_library(pynestkernel MODULE ${pynestkernel})
-add_library(nestkernel_api MODULE ${nestkernel_api})
+if ( HAVE_PYTHON )
 
-target_link_libraries( pynestkernel
-    nest_lib nestutil nestkernel sli_lib
-    ${SLI_MODULES} ${EXTERNAL_MODULE_LIBRARIES}
-    )
+  message( STATUS "We are going to check CYTHON_FOUND: ${CYTHON_FOUND}" )
+  if ( CYTHON_FOUND )
 
-target_link_libraries( nestkernel_api
-    nest_lib nestutil nestkernel sli_lib
-    ${SLI_MODULES} ${EXTERNAL_MODULE_LIBRARIES}
-    )
+      message( STATUS "Adding targets!" )
+      add_cython_target ( pynestkernel pynestkernel.pyx CXX PY3)
+      add_cython_target ( nestkernel_api nestkernel_api.pyx CXX PY3)
 
-target_include_directories( pynestkernel PRIVATE
-    ${PROJECT_BINARY_DIR}/libnestutil
-    ${PROJECT_SOURCE_DIR}/libnestutil
-    ${PROJECT_SOURCE_DIR}/pynest
-    ${PROJECT_SOURCE_DIR}/nestkernel
-    ${PROJECT_SOURCE_DIR}/nestkernel/spatial
-    ${PROJECT_SOURCE_DIR}/sli
-    ${PROJECT_SOURCE_DIR}/thirdparty
-    ${SLI_MODULE_INCLUDE_DIRS}
-    ${Python_INCLUDE_DIRS}
-    )
-target_include_directories( nestkernel_api PRIVATE
-    ${PROJECT_BINARY_DIR}/libnestutil
-    ${PROJECT_SOURCE_DIR}/libnestutil
-    ${PROJECT_SOURCE_DIR}/pynest
-    ${PROJECT_SOURCE_DIR}/nestkernel
-    ${PROJECT_SOURCE_DIR}/nestkernel/spatial
-    ${PROJECT_SOURCE_DIR}/sli
-    ${PROJECT_SOURCE_DIR}/thirdparty
-    ${SLI_MODULE_INCLUDE_DIRS}
-    ${Python_INCLUDE_DIRS}
-    )
+      add_library(pynestkernel MODULE ${pynestkernel})
+      set_target_properties(pynestkernel PROPERTIES PREFIX "${PYTHON_MODULE_PREFIX}")
+      add_library(nestkernel_api MODULE ${nestkernel_api})
+      set_target_properties(nestkernel_api PROPERTIES PREFIX "${PYTHON_MODULE_PREFIX}")
+  else ()
+    message( FATAL_ERROR "You have configured NEST to build the Python bindings PyNEST, but "
+          "there is no Cython version found on your system." )
+  endif ()
 
-target_compile_definitions( pynestkernel PRIVATE
-    -D_IS_PYNEST
-    )
-target_compile_definitions( nestkernel_api PRIVATE
-    -D_IS_PYNEST
-    )
+  target_link_libraries( pynestkernel
+      nest_lib nestutil nestkernel sli_lib
+      ${SLI_MODULES} ${EXTERNAL_MODULE_LIBRARIES}
+      )
 
-install(DIRECTORY  nest/ ${PROJECT_BINARY_DIR}/pynest/nest/
-    DESTINATION ${CMAKE_INSTALL_PREFIX}/${PYEXECDIR}/nest
-    PATTERN "versionchecker.py.in" EXCLUDE
-)
-install( TARGETS pynestkernel DESTINATION ${PYEXECDIR}/nest/ )
-install( TARGETS nestkernel_api DESTINATION ${PYEXECDIR}/nest/ )
+  target_link_libraries( nestkernel_api
+      nest_lib nestutil nestkernel sli_lib
+      ${SLI_MODULES} ${EXTERNAL_MODULE_LIBRARIES}
+      )
 
-install( DIRECTORY examples/
-    DESTINATION ${CMAKE_INSTALL_DOCDIR}/examples/pynest
-)
+  target_include_directories( pynestkernel PRIVATE
+      ${PROJECT_BINARY_DIR}/libnestutil
+      ${PROJECT_SOURCE_DIR}/libnestutil
+      ${PROJECT_SOURCE_DIR}/pynest
+      ${PROJECT_SOURCE_DIR}/nestkernel
+      ${PROJECT_SOURCE_DIR}/nestkernel/spatial
+      ${PROJECT_SOURCE_DIR}/sli
+      ${PROJECT_SOURCE_DIR}/thirdparty
+      ${SLI_MODULE_INCLUDE_DIRS}
+      ${Python_INCLUDE_DIRS}
+      )
+  target_include_directories( nestkernel_api PRIVATE
+      ${PROJECT_BINARY_DIR}/libnestutil
+      ${PROJECT_SOURCE_DIR}/libnestutil
+      ${PROJECT_SOURCE_DIR}/pynest
+      ${PROJECT_SOURCE_DIR}/nestkernel
+      ${PROJECT_SOURCE_DIR}/nestkernel/spatial
+      ${PROJECT_SOURCE_DIR}/sli
+      ${PROJECT_SOURCE_DIR}/thirdparty
+      ${SLI_MODULE_INCLUDE_DIRS}
+      ${Python_INCLUDE_DIRS}
+      )
+
+  target_compile_definitions( pynestkernel PRIVATE
+      -D_IS_PYNEST
+      )
+  target_compile_definitions( nestkernel_api PRIVATE
+      -D_IS_PYNEST
+      )
+
+  install(DIRECTORY  nest/ ${PROJECT_BINARY_DIR}/pynest/nest/
+      DESTINATION ${CMAKE_INSTALL_PREFIX}/${PYEXECDIR}/nest
+      PATTERN "versionchecker.py.in" EXCLUDE
+  )
+  install( TARGETS pynestkernel DESTINATION ${PYEXECDIR}/nest/ )
+  install( TARGETS nestkernel_api DESTINATION ${PYEXECDIR}/nest/ )
+
+  install( DIRECTORY examples/
+      DESTINATION ${CMAKE_INSTALL_DOCDIR}/examples/pynest
+  )
+
+endif ()
