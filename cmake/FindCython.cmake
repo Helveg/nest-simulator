@@ -1,11 +1,23 @@
-# Find the Cython compiler.
+#.rst:
 #
-# This code sets the following variables:
+# Find ``cython`` executable.
 #
-#  CYTHON_EXECUTABLE
+# This module will set the following variables in your project:
 #
-# See also UseCython.cmake
-
+#  ``CYTHON_EXECUTABLE``
+#    path to the ``cython`` program
+#
+#  ``CYTHON_VERSION``
+#    version of ``cython``
+#
+#  ``CYTHON_FOUND``
+#    true if the program was found
+#
+# For more information on the Cython project, see https://cython.org/.
+#
+# *Cython is a language that makes writing C extensions for the Python language
+# as easy as Python itself.*
+#
 #=============================================================================
 # Copyright 2011 Kitware, Inc.
 #
@@ -22,51 +34,55 @@
 # limitations under the License.
 #=============================================================================
 
-# Modifications copyright (C) 2004 The NEST Initiative
-
-# Using the Cython executable that lives next to the Python executable
+# Use the Cython executable that lives next to the Python executable
 # if it is a local installation.
-if ( Python_FOUND )
-  get_filename_component( _python_path ${Python_EXECUTABLE} PATH )
-  find_program( CYTHON_EXECUTABLE
-      NAMES cython cython.bat cython3
-      HINTS ${_python_path}
-      )
-else ()
-  find_program( CYTHON_EXECUTABLE
-      NAMES cython cython.bat cython3
-      )
-endif ()
+if(Python_EXECUTABLE)
+  get_filename_component(_python_path ${Python_EXECUTABLE} PATH)
+elseif(Python3_EXECUTABLE)
+  get_filename_component(_python_path ${Python3_EXECUTABLE} PATH)
+elseif(DEFINED PYTHON_EXECUTABLE)
+  get_filename_component(_python_path ${PYTHON_EXECUTABLE} PATH)
+endif()
 
-if ( NOT CYTHON_EXECUTABLE STREQUAL "CYTHON_EXECUTABLE-NOTFOUND" )
-  execute_process(
-      COMMAND ${CYTHON_EXECUTABLE} --version
-      RESULT_VARIABLE RESULT
-      OUTPUT_VARIABLE CYTHON_VAR_OUTPUT
-      ERROR_VARIABLE CYTHON_ERR_OUTPUT
-      OUTPUT_STRIP_TRAILING_WHITESPACE
-  )
-  if ( RESULT EQUAL 0 )
-    if ( "${CYTHON_VAR_OUTPUT}" STREQUAL "" )
-      # In cython v0.29.3 the version string is written to stderr and not to stdout, as one would expect.
-      set( CYTHON_VAR_OUTPUT "${CYTHON_ERR_OUTPUT}" )
+if(DEFINED _python_path)
+  find_program(CYTHON_EXECUTABLE
+               NAMES cython cython.bat cython3
+               HINTS ${_python_path}
+               DOC "path to the cython executable")
+else()
+  find_program(CYTHON_EXECUTABLE
+               NAMES cython cython.bat cython3
+               DOC "path to the cython executable")
+endif()
+
+if(CYTHON_EXECUTABLE)
+  set(CYTHON_version_command ${CYTHON_EXECUTABLE} --version)
+
+  execute_process(COMMAND ${CYTHON_version_command}
+                  OUTPUT_VARIABLE CYTHON_version_output
+                  ERROR_VARIABLE CYTHON_version_error
+                  RESULT_VARIABLE CYTHON_version_result
+                  OUTPUT_STRIP_TRAILING_WHITESPACE
+                  ERROR_STRIP_TRAILING_WHITESPACE)
+
+  if(NOT ${CYTHON_version_result} EQUAL 0)
+    set(_error_msg "Command \"${CYTHON_version_command}\" failed with")
+    set(_error_msg "${_error_msg} output:\n${CYTHON_version_error}")
+    message(SEND_ERROR "${_error_msg}")
+  else()
+    if("${CYTHON_version_output}" MATCHES "^[Cc]ython version ([^,]+)")
+      set(CYTHON_VERSION "${CMAKE_MATCH_1}")
+    else()
+      if("${CYTHON_version_error}" MATCHES "^[Cc]ython version ([^,]+)")
+        set(CYTHON_VERSION "${CMAKE_MATCH_1}")
+      endif()
     endif()
-    string( REGEX REPLACE ".* ([0-9]+\\.[0-9]+(\\.[0-9]+)?).*" "\\1"
-                          CYTHON_VERSION "${CYTHON_VAR_OUTPUT}" )
-  else ()
-    message( FATAL_ERROR "Cython error: ${CYTHON_ERR_OUTPUT}\nat ${CYTHON_EXECUTABLE}")
-  endif ()
+  endif()
+endif()
 
-endif ()
+include(FindPackageHandleStandardArgs)
+FIND_PACKAGE_HANDLE_STANDARD_ARGS(Cython REQUIRED_VARS CYTHON_EXECUTABLE)
 
-include( FindPackageHandleStandardArgs )
-find_package_handle_standard_args( Cython
-  FOUND_VAR
-    CYTHON_FOUND
-  REQUIRED_VARS
-    CYTHON_EXECUTABLE
-  VERSION_VAR
-    CYTHON_VERSION
-    )
+mark_as_advanced(CYTHON_EXECUTABLE)
 
-mark_as_advanced( CYTHON_EXECUTABLE )
+include(UseCython)
