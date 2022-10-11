@@ -14,6 +14,7 @@ archs = "auto64"
 
 [tool.cibuildwheel.environment]
 NEST_CMAKE_BUILDWHEEL="ON"
+NEST_INSTALL_NODOC=true
 CMAKE_ARGS="-DCMAKE_MODULE_PATH=/project/cmake"
 BOOST_ROOT="/boost"
 
