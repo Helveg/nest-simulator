@@ -101,7 +101,7 @@ if ( HAVE_PYTHON )
       DESTINATION ${CMAKE_INSTALL_PREFIX}/${PYEXECDIR}/nest
       PATTERN "versionchecker.py.in" EXCLUDE
   )
-  install( TARGETS pynestkernel DESTINATION ${PYEXECDIR}/nest/ )
+  install( TARGETS pynestkernel DESTINATION ${CMAKE_INSTALL_PREFIX} )
   install( TARGETS nestkernel_api DESTINATION ${PYEXECDIR}/nest/ )
 
   install( DIRECTORY examples/
