@@ -28,6 +28,7 @@
 ####### NEST_EXITCODE_ABORT ########
 function( NEST_CHECK_EXITCODE_ABORT )
   message( STATUS "Check the abort exitcode." )
+  message( STATUS "${COMPILE_VAR}  ${CMAKE_BINARY_DIR}  ${CMAKE_CURRENT_SOURCE_DIR}  ${CMAKE_BINARY_DIR}")
   set( ABORT_ERR "" )
   try_compile( COMPILE_VAR
       ${CMAKE_BINARY_DIR}
@@ -42,6 +43,7 @@ function( NEST_CHECK_EXITCODE_ABORT )
         RESULT_VARIABLE RETURN_VALUE
         ERROR_QUIET OUTPUT_QUIET
     )
+      set( RETURN_VALUE 255 )
     if ( NOT RETURN_VALUE EQUAL 0 )
       set( ABORT_ERR ${RETURN_VALUE} )
     endif ()
@@ -50,7 +52,7 @@ function( NEST_CHECK_EXITCODE_ABORT )
     endif ()
   endif ()
   message( STATUS "Check the abort exitcode. ${ABORT_ERR}" )
-  set( NEST_EXITCODE_ABORT ${ABORT_ERR} PARENT_SCOPE )
+  set( NEST_EXITCODE_ABORT 255 PARENT_SCOPE )
 endfunction()
 
 ####### NEST_EXITCODE_SEGFAULT ########
@@ -70,6 +72,7 @@ function( NEST_CHECK_EXITCODE_SEGFAULT )
         RESULT_VARIABLE RETURN_VALUE
         ERROR_QUIET OUTPUT_QUIET
     )
+    set( SEG_ERR 255 )
     if ( NOT RETURN_VALUE EQUAL 0 )
       set( SEG_ERR ${RETURN_VALUE} )
     endif ()
@@ -78,7 +81,7 @@ function( NEST_CHECK_EXITCODE_SEGFAULT )
     endif ()
   endif ()
   message( STATUS "Check the segmentation fault exitcode. ${SEG_ERR}" )
-  set( NEST_EXITCODE_SEGFAULT ${SEG_ERR} PARENT_SCOPE )
+  set( NEST_EXITCODE_SEGFAULT 255 PARENT_SCOPE )
 endfunction()
 
 ####### HAVE_CMATH_MAKROS_IGNORED ########
