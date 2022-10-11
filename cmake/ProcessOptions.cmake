@@ -241,10 +241,12 @@ function( NEST_PROCESS_STATIC_LIBRARIES )
           "\$ORIGIN/../${CMAKE_INSTALL_LIBDIR}/nest"
           # for libraries (except pynestkernel)
           "\$ORIGIN/../../${CMAKE_INSTALL_LIBDIR}/nest"
-          # for pynestkernel: origin at <prefix>/lib/python3.x/site-packages/nest
+          # for wheel pynestkernel: origin at <prefix>/lib/python3.x/site-packages/nest
+          # On the target machine, the libs are installed in these 2 locations:
           "\$ORIGIN/../../../nest"
+          "\$ORIGIN/../nest_simulator.libs"
+          # During wheel building, the libs are found here:
           "\$ORIGIN/${CMAKE_INSTALL_LIBDIR}/nest"
-          "${CMAKE_INSTALL_LIBDIR}/nest"
           PARENT_SCOPE )
     endif ()
 
