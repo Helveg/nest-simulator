@@ -236,6 +236,9 @@ function( NEST_PROCESS_STATIC_LIBRARIES )
           "@loader_path/../../../nest"
           PARENT_SCOPE )
     else ()
+      message( STATUS "Looking for libs in install prefix: ${CMAKE_INSTALL_PREFIX}/lib/nest")
+        message( STATUS "Looking for libs in relfolder: \$ORIGIN/../../lib/nest")
+
       set( CMAKE_INSTALL_RPATH
           # for binaries
           "\$ORIGIN/../${CMAKE_INSTALL_LIBDIR}/nest"
@@ -246,7 +249,7 @@ function( NEST_PROCESS_STATIC_LIBRARIES )
           "\$ORIGIN/../../../nest"
           "\$ORIGIN/../nest_simulator.libs"
           # During wheel building, the libs are found here:
-          "\$ORIGIN/${CMAKE_INSTALL_LIBDIR}/nest"
+          "\$ORIGIN/../../lib/nest"
           PARENT_SCOPE )
     endif ()
 
