@@ -24,7 +24,7 @@ from skbuild import setup
 
 setup(
     name = 'nest-simulator',
-    version = '3.420.0',
+    version = '3.3.0-dev0',
     description = 'Python bindings for NEST',
     author = 'The NEST Initiative',
     url = 'https://www.nest-simulator.org',

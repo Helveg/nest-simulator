@@ -18,6 +18,7 @@ NEST_CMAKE_BUILDWHEEL="ON"
 NEST_INSTALL_NODOC=true
 CMAKE_ARGS="-DCMAKE_MODULE_PATH=/project/cmake"
 BOOST_ROOT="/boost"
+GSL_ROOT_DIR="/gsl"
 
 [tool.cibuildwheel.linux]
 before-build = "python3 extras/wheelbuild/prepare_container.py"
