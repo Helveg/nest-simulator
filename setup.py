@@ -19,6 +19,7 @@
 # You should have received a copy of the GNU General Public License
 # along with NEST.  If not, see <http://www.gnu.org/licenses/>.
 
+from setuptools import find_packages
 from skbuild import setup
 
 setup(
@@ -28,7 +29,7 @@ setup(
     author = 'The NEST Initiative',
     url = 'https://www.nest-simulator.org',
     license = 'GPLv2+',
-    packages = ['nest', 'nest.lib'],
+    packages = find_packages(where="pynest"),
     package_dir = {
         "": "pynest"
     },
