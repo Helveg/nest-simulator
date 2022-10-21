@@ -9,7 +9,7 @@ requires = [
 build-backend = "setuptools.build_meta"
 
 [tool.cibuildwheel]
-skip = ["*-musllinux_*", "*cp36*", "*cp37*"]
+skip = ["*-musllinux_*", "*cp36*", "*cp37*", "*pp3*"]
 archs = "auto64"
 build-verbosity = 3
 
