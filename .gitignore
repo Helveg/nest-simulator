@@ -6,6 +6,7 @@ install/
 reports/
 _skbuild/
 *.egg-info/
+wheelhouse/
 
 # compilation artefacts
 pynest/pynestkernel.cxx
