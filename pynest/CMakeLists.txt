@@ -76,10 +76,7 @@ if ( HAVE_PYTHON )
       -D_IS_PYNEST
       )
 
-  install(DIRECTORY  nest/ ${PROJECT_BINARY_DIR}/pynest/nest/
-      DESTINATION ${CMAKE_INSTALL_PREFIX}/${PYEXECDIR}/nest
-      PATTERN "versionchecker.py.in" EXCLUDE
-  )
+  # Install the PyNEST libraries into the Python build tree source folder.
   install( TARGETS pynestkernel DESTINATION pynest/nest )
   install( TARGETS nestkernel_api DESTINATION pynest/nest )
 
