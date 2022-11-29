@@ -19,14 +19,8 @@
 
 find_package(Cython)
 
-message( STATUS "We are going to check HAVE_PYTHON: ${HAVE_PYTHON}" )
-
 if ( HAVE_PYTHON )
-
-  message( STATUS "We are going to check CYTHON_FOUND: ${CYTHON_FOUND}" )
   if ( CYTHON_FOUND )
-
-      message( STATUS "Adding targets!" )
       add_cython_target ( pynestkernel pynestkernel.pyx CXX PY3)
       add_cython_target ( nestkernel_api nestkernel_api.pyx CXX PY3)
 
@@ -35,8 +29,11 @@ if ( HAVE_PYTHON )
       add_library(nestkernel_api MODULE ${nestkernel_api})
       set_target_properties(nestkernel_api PROPERTIES PREFIX "${PYTHON_MODULE_PREFIX}")
   else ()
-    message( FATAL_ERROR "You have configured NEST to build the Python bindings PyNEST, but "
-          "there is no Cython version found on your system." )
+    message(
+        FATAL_ERROR
+        "You have configured NEST to build the Python bindings PyNEST,"
+        " but there is no Cython version found."
+        )
   endif ()
 
   target_link_libraries( pynestkernel
