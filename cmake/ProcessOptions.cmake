@@ -583,7 +583,7 @@ function( NEST_PROCESS_WITH_BOOST )
     set(Boost_USE_RELEASE_LIBS ON) # only find release libs
     # Needs Boost version >=1.62.0 to use Boost sorting, JUNIT logging
     # Require Boost version >=1.69.0 due to change in Boost sort
-    find_package( Boost 1.69.0 )
+    find_package( Boost 1.69.0 COMPONENTS iterator sort test tuple)
     if ( Boost_FOUND )
       # export found variables to parent scope
       set( HAVE_BOOST ON PARENT_SCOPE )
