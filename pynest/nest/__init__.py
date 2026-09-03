@@ -40,86 +40,118 @@ r"""PyNEST - Python interface for the NEST Simulator
 For more information visit https://www.nest-simulator.org.
 """
 
-# WARINIG: Since this file uses a ton of trickery, linter warnings are mostly
-# disabled. This means that you need to make sure style is fine yourself!!!
+# `nest` is more than a namespace. Kernel attributes such as `nest.resolution` read
+# from and write to the running kernel, which takes descriptors, and descriptors only
+# fire when they are found on an object's *type*. So at the bottom of this file the
+# module object is given the `NestModule` type defined below (PEP 562). Retyping the
+# module object the interpreter already created -- rather than replacing it -- keeps
+# `import nest` pointing at one and the same object everywhere, including inside the
+# compiled `nestkernel_api` extension and inside the `hl_api` modules.
 #
-# pylint: disable=wrong-import-position, no-name-in-module, undefined-variable
-# pylint: disable=invalid-name, protected-access
+# Having a type also means `nest` can have a `__getattr__`, so nothing beyond the
+# kernel itself has to be imported until a script reaches for it:
+#
+#   * `nest.Create` and the rest of the API are resolved, on first access, from
+#     whichever `lib/hl_api_*` module exports them;
+#   * `nest.spatial`, `nest.random` and the other submodules are imported on first
+#     access, and are discovered from the package directory rather than listed;
+#   * the kernel attributes are declared as annotations at the bottom of this file and
+#     turned into descriptors by `_install_kernel_attributes`.
+#
+# pylint: disable=wildcard-import, unused-wildcard-import, no-name-in-module, invalid-name
 
-# WARNING: This file is only used to create the `NestModule` below and then
-# ignored. If you'd like to make changes to the root `nest` module, they need to
-# be made to the `NestModule` class/instance instead.
+import sys
+import types
+import typing
+from typing import Annotated
 
-################
+from . import ll_api as _ll_api  # noqa: F401  (importing `ll_api` starts the kernel)
+from .ll_api import KernelAttribute, set_communicator  # noqa: F401
 
-# Store interpreter-given module attributes to copy into replacement module
-# instance later on. Use `.copy()` to prevent pollution with other variables
-_original_module_attrs = globals().copy()
-
-import builtins  # noqa
-import importlib  # noqa
-import sys  # noqa
-import types  # noqa
-
-from .ll_api import KernelAttribute  # noqa
+if typing.TYPE_CHECKING:
+    # Static analysis has no way to follow `NestModule.__getattr__`, so the namespace it
+    # builds at runtime is spelled out here for the benefit of type checkers and IDEs.
+    # Nothing reads this block at runtime -- the runtime discovers both the submodules and
+    # the `hl_api` modules from the package directory -- so a stale entry costs type
+    # information, never correctness. `test_api_surface.py` fails if the two drift apart.
+    from . import (  # noqa: F401
+        ll_api,
+        logic,
+        math,
+        random,
+        raster_plot,
+        server,
+        spatial,
+        spatial_distributions,
+        visualization,
+        voltage_trace,
+    )
+    from .lib.hl_api_connections import *  # noqa: F401,F403
+    from .lib.hl_api_info import *  # noqa: F401,F403
+    from .lib.hl_api_models import *  # noqa: F401,F403
+    from .lib.hl_api_nodes import *  # noqa: F401,F403
+    from .lib.hl_api_parallel_computing import *  # noqa: F401,F403
+    from .lib.hl_api_simulation import *  # noqa: F401,F403
+    from .lib.hl_api_sonata import *  # noqa: F401,F403
+    from .lib.hl_api_spatial import *  # noqa: F401,F403
+    from .lib.hl_api_types import *  # noqa: F401,F403
 
 try:
-    import versionchecker  # noqa: F401
+    # Bound under a private name so that it stays out of the `nest` API.
+    import versionchecker as _versionchecker  # noqa: F401
 except ImportError:
     pass
+
+NESTErrors = _ll_api.nestkernel.NESTErrors
+NESTError = _ll_api.nestkernel.NESTErrors.KernelException
 
 
 class NestModule(types.ModuleType):
     """
-    A module class for the ``nest`` root module to control the dynamic generation
-    of module level attributes such as the KernelAttributes, lazy loading
-    some submodules and importing the public APIs of the `lib` submodules.
+    Type of the ``nest`` root module.
+
+    The kernel attributes below are descriptors: reading ``nest.<attribute>`` reads the
+    status of the running NEST kernel and assigning to it writes that status.
+    Descriptors are only honoured when they live on a type, which is why the ``nest``
+    module object is given this type rather than plain ``ModuleType``.
     """
 
-    from . import ll_api  # noqa
-    from . import logic  # noqa
-    from . import math  # noqa
-    from . import random  # noqa
-    from . import spatial_distributions  # noqa
-    from .ll_api import set_communicator
+    # Submodules that `nest` uses to reach the kernel or that only matter during
+    # start-up. They stay reachable, but `nest` does not advertise them.
+    _PRIVATE_SUBMODULES = frozenset({"lib", "nestkernel_api", "versionchecker"})
 
-    NESTErrors = ll_api.nestkernel.NESTErrors
-    NESTError = ll_api.nestkernel.NESTErrors.KernelException
+    # Filled in by `_submodules()` on first use.
+    _submodule_names = None
 
-    def __init__(self, name):
-        super().__init__(name)
-        # Copy over the original module attributes to preserve all interpreter-given
-        # magic attributes such as `__name__`, `__path__`, `__package__`, ...
-        self.__dict__.update(_original_module_attrs)  # noqa
+    def _submodules(self):
+        """Names of the submodules `nest` exposes, read from the package directory."""
 
-        # Import public APIs of submodules into the `nest.` namespace
-        _rel_import_star(self, ".lib.hl_api_connections")  # noqa: F821
-        _rel_import_star(self, ".lib.hl_api_info")  # noqa: F821
-        _rel_import_star(self, ".lib.hl_api_models")  # noqa: F821
-        _rel_import_star(self, ".lib.hl_api_nodes")  # noqa: F821
-        _rel_import_star(self, ".lib.hl_api_parallel_computing")  # noqa: F821
-        _rel_import_star(self, ".lib.hl_api_simulation")  # noqa: F821
-        _rel_import_star(self, ".lib.hl_api_sonata")  # noqa: F821
-        _rel_import_star(self, ".lib.hl_api_spatial")  # noqa: F821
-        _rel_import_star(self, ".lib.hl_api_types")  # noqa: F821
+        import pkgutil
 
-        # Lazy loaded modules. They are descriptors, so add them to the type object
-        type(self).raster_plot = _lazy_module_property("raster_plot")  # noqa: F821
-        type(self).server = _lazy_module_property("server")  # noqa: F821
-        type(self).spatial = _lazy_module_property("spatial")  # noqa: F821
-        type(self).visualization = _lazy_module_property("visualization")  # noqa: F821
-        type(self).voltage_trace = _lazy_module_property("voltage_trace")  # noqa: F821
+        if NestModule._submodule_names is None:
+            NestModule._submodule_names = frozenset(
+                name
+                for _, name, _ in pkgutil.iter_modules(self.__path__)
+                if not name.startswith("_") and name not in NestModule._PRIVATE_SUBMODULES
+            )
+        return NestModule._submodule_names
 
-        # Finalize the nest module with a public API.
-        _api = list(k for k in self.__dict__ if not k.startswith("_"))
-        _api.extend(k for k in dir(type(self)) if not k.startswith("_"))
-        self.__all__ = list(set(_api))
+    def _api_modules(self):
+        """
+        Yield the ``lib.hl_api_*`` modules whose public API `nest` re-exports, importing
+        them one at a time so that a lookup stops as soon as it has found its name. The
+        ``*_helper`` modules are internal and are skipped, as they are by the
+        documentation build.
+        """
 
-        # Add version for backward compatibility
-        self.__version__ = NestModule.ll_api.nestkernel.llapi_get_kernel_status()["build_info"]["version"]
+        import importlib
+        import pkgutil
 
-        # Block setting of unknown attributes
-        type(self).__setattr__ = _setattr_error
+        lib = importlib.import_module(".lib", __name__)
+        names = sorted(name for _, name, _ in pkgutil.iter_modules(lib.__path__))
+        for name in names:
+            if name.startswith("hl_api_") and "helper" not in name:
+                yield importlib.import_module(f".lib.{name}", __name__)
 
     def set(self, **kwargs):
         "Forward kernel attribute setting to `SetKernelStatus()`."
@@ -134,315 +166,71 @@ class NestModule(types.ModuleType):
         return self.GetKernelStatus(args)
 
     def __dir__(self):
-        return list(set(vars(self).keys()) | set(self.__all__))
+        # `__all__` first: building it caches it in the module dictionary, so that the
+        # `vars(self)` below sees it.
+        api = set(self.__all__)
+        return list(api | {name for name in vars(self) if name not in NestModule._PRIVATE_SUBMODULES})
 
-    # Define the kernel attributes.
-    #
-    # FORMATTING NOTES:
-    # * Multiline strings render incorrectly, join multiple single-quote
-    #   strings instead.
-    # * Strings containing `:` render incorrectly.
-    # * Do not end docstrings with punctuation. A `.` or `,` is added by the
-    #   formatting logic.
+    def __getattr__(self, attr):
+        """
+        Resolve a name that `nest` exposes but has not imported yet: one of its
+        submodules, or one of the names re-exported from a ``lib.hl_api_*`` module. The
+        `hl_api` modules are imported one by one until one declares the name in its
+        ``__all__``; the result is cached in the module dictionary, so this runs once
+        per name.
 
-    kernel_status = KernelAttribute("dict", "Get the complete kernel status", readonly=True)
-    resolution = KernelAttribute("float", "The resolution of the simulation (in ms)", default=0.1)
-    biological_time = KernelAttribute("float", "The current simulation time (in ms)")
-    build_info = KernelAttribute(
-        "dict",
-        "Information about the build and compile configuration of NEST",
-        readonly=True,
-    )
-    memory_size = KernelAttribute("int", "Memory size of NEST process in kB (-1 if unavailable)", readonly=True)
-    to_do = KernelAttribute("int", "The number of steps yet to be simulated", readonly=True)
-    max_delay = KernelAttribute("float", "The maximum delay in the network", default=0.1)
-    min_delay = KernelAttribute("float", "The minimum delay in the network", default=0.1)
-    ms_per_tic = KernelAttribute(
-        "float",
-        ("The number of milliseconds per tic. Calculated by " + "ms_per_tic = 1 / tics_per_ms"),
-        readonly=True,
-    )
-    tics_per_ms = KernelAttribute(
-        "float",
-        (
-            "The number of tics per millisecond. Change of tics_per_ms "
-            + "requires simultaneous specification of resolution"
-        ),
-        default=1000.0,
-    )
-    tics_per_step = KernelAttribute(
-        "int",
-        "The number of tics per simulation time step. Calculated as tics_per_step = resolution * tics_per_ms",
-        readonly=True,
-    )
-    T_max = KernelAttribute("float", "The largest representable time value", readonly=True)
-    T_min = KernelAttribute("float", "The smallest representable time value", readonly=True)
-    rng_types = KernelAttribute(
-        "list[str]",
-        "List of available random number generator types",
-        readonly=True,
-    )
-    rng_type = KernelAttribute(
-        "str",
-        "Name of random number generator type used by NEST",
-        default="mt19937_64",
-    )
-    rng_seed = KernelAttribute(
-        "int",
-        ("Seed value used as base for seeding NEST random number generators " + r"(:math:`1 \leq s\leq 2^{32}-1`)"),
-        default=143202461,
-    )
-    total_num_virtual_procs = KernelAttribute("int", "The total number of virtual processes", default=1)
-    local_num_threads = KernelAttribute("int", "The local number of threads", default=1)
-    num_processes = KernelAttribute("int", "The number of MPI processes", readonly=True)
-    off_grid_spiking = KernelAttribute(
-        "bool",
-        "Whether to transmit precise spike times in MPI communication",
-        readonly=True,
-    )
-    adaptive_target_buffers = KernelAttribute(
-        "bool",
-        "Whether MPI buffers for communication of connections resize on the fly",
-        default=True,
-    )
-    send_buffer_size_secondary_events = KernelAttribute(
-        "int",
-        ("Size of MPI send buffers for communicating secondary events " + "(in bytes, per MPI rank, for developers)"),
-        readonly=True,
-    )
-    recv_buffer_size_secondary_events = KernelAttribute(
-        "int",
-        ("Size of MPI recv buffers for communicating secondary events " + "(in bytes, per MPI rank, for developers)"),
-        readonly=True,
-    )
-    buffer_size_spike_data = KernelAttribute(
-        "int",
-        "Total size of MPI buffer for communication of spikes",
-        default=2,
-    )
-    buffer_size_target_data = KernelAttribute(
-        "int",
-        "Total size of MPI buffer for communication of connections",
-        default=2,
-    )
-    growth_factor_buffer_target_data = KernelAttribute(
-        "float",
-        ("If MPI buffers for communication of connections resize on the " + "fly, grow them by this factor each round"),
-        default=1.5,
-    )
-    max_buffer_size_target_data = KernelAttribute(
-        "int",
-        "Maximal size of MPI buffers for communication of connections",
-        default=16777216,
-    )
-    spike_buffer_grow_extra = KernelAttribute(
-        "float",
-        "When spike exchange buffer is expanded, resize it to "
-        + "`(1 + spike_buffer_grow_extra) * required_buffer_size`",
-        default=0.5,
-    )
-    spike_buffer_shrink_limit = KernelAttribute(
-        "float",
-        (
-            "If the largest number of spikes sent from any rank to any rank is less than "
-            + "`spike_buffer_shrink_limit * buffer_size`, then reduce buffer size. "
-            + "`spike_buffer_shrink_limit == 0` means that buffers never shrink. "
-            + "See ``spike_buffer_shrink_spare`` for how the new buffer size is determined"
-        ),
-        default=0.2,
-    )
-    spike_buffer_shrink_spare = KernelAttribute(
-        "float",
-        (
-            "When the buffer shrinks, set the new size to "
-            + "`(1 + spike_buffer_shrink_spare) * required_buffer_size`. "
-            + "See `spike_buffer_shrink_limit` for when buffers shrink"
-        ),
-        default=0.1,
-    )
-    spike_buffer_resize_log = KernelAttribute(
-        "dict",
-        (
-            "Log of spike buffer resizing as a dictionary. It contains the "
-            + "`times` of the resizings (simulation clock in steps, always multiple of ``min_delay``), "
-            + "``global_max_spikes_sent``, that is, the observed spike number that triggered the resize, "
-            + "and the ``new_buffer_size``. Sizes for the buffer section sent from one rank to another rank"
-        ),
-        readonly=True,
-    )
-    cycle_time_log = KernelAttribute(
-        "dict",
-        ("Information on the duration and spike counts within each update cycle."),
-        readonly=True,
-    )
-    use_wfr = KernelAttribute("bool", "Whether to use waveform relaxation method", default=True)
-    wfr_comm_interval = KernelAttribute(
-        "float",
-        "Desired waveform relaxation communication interval",
-        default=1.0,
-    )
-    wfr_tol = KernelAttribute(
-        "float",
-        "Convergence tolerance of waveform relaxation method",
-        default=0.0001,
-    )
-    wfr_max_iterations = KernelAttribute(
-        "int",
-        "Maximal number of iterations used for waveform relaxation",
-        default=15,
-    )
-    wfr_interpolation_order = KernelAttribute(
-        "int", "Interpolation order of polynomial used in wfr iterations", default=3
-    )
-    max_num_syn_models = KernelAttribute("int", "Maximal number of synapse models supported", readonly=True)
-    structural_plasticity_synapses = KernelAttribute(
-        "dict",
-        (
-            "Defines all synapses which are plastic for the structural"
-            + " plasticity algorithm. Each entry in the dictionary is composed"
-            + " of a synapse model, the presynaptic element and the"
-            + " postsynaptic element"
-        ),
-    )
-    structural_plasticity_update_interval = KernelAttribute(
-        "int",
-        (
-            "Defines the time interval in ms at which the structural plasticity"
-            + " manager will make changes in the structure of the network ("
-            + " creation and deletion of plastic synapses)"
-        ),
-        default=10000,
-    )
-    growth_curves = KernelAttribute(
-        "list[str]",
-        "The list of the available structural plasticity growth curves",
-        readonly=True,
-    )
-    use_compressed_spikes = KernelAttribute(
-        "bool",
-        (
-            "Whether to use spike compression; if a neuron has targets on"
-            + " multiple threads of a process, this switch makes sure that only"
-            + " a single packet is sent to the process instead of one packet"
-            + " per target thread; it implies that connections are sorted by source."
-        ),
-        default=True,
-    )
-    data_path = KernelAttribute(
-        "str",
-        "A path, where all data is written to, defaults to current directory",
-    )
-    data_prefix = KernelAttribute("str", "A common prefix for all data files")
-    overwrite_files = KernelAttribute("bool", "Whether to overwrite existing data files", default=False)
-    print_time = KernelAttribute(
-        "bool",
-        "Whether to print progress information during the simulation",
-        default=False,
-    )
-    network_size = KernelAttribute("int", "The number of nodes in the network", readonly=True)
-    num_connections = KernelAttribute(
-        "int",
-        "The number of connections in the network",
-        readonly=True,
-        localonly=True,
-    )
-    connection_rules = KernelAttribute(
-        "list[str]",
-        "The list of available connection rules",
-        readonly=True,
-    )
-    node_models = KernelAttribute(
-        "list[str]",
-        "The list of the available node (i.e., neuron or device) models",
-        readonly=True,
-    )
-    synapse_models = KernelAttribute(
-        "list[str]",
-        "The list of the available synapse models",
-        readonly=True,
-    )
-    local_spike_counter = KernelAttribute(
-        "int",
-        (
-            "Number of spikes fired by neurons on a given MPI rank during the"
-            + " most recent call to :py:func:`.Simulate`. Only spikes from"
-            + ' "normal" neurons are counted, not spikes generated by devices'
-            + " such as ``poisson_generator``. Resets on each call to ``Simulate`` or ``Run``."
-        ),
-        readonly=True,
-    )
-    recording_backends = KernelAttribute(
-        "list[str]",
-        "List of available backends for recording devices",
-        readonly=True,
-    )
-    stimulation_backends = KernelAttribute(
-        "list[str]",
-        "List of available backends for stimulation devices",
-        readonly=True,
-    )
-    dict_miss_is_error = KernelAttribute(
-        "bool",
-        "Whether missed dictionary entries are treated as errors",
-        default=True,
-    )
-    keep_source_table = KernelAttribute(
-        "bool",
-        "Whether to keep source table after connection setup is complete",
-        default=True,
-    )
-    min_update_time = KernelAttribute(
-        "float",
-        "Shortest wall-clock time measured so far for a full update step [seconds]",
-        readonly=True,
-    )
-    max_update_time = KernelAttribute(
-        "float",
-        "Longest wall-clock time measured so far for a full update step [seconds]",
-        readonly=True,
-    )
-    update_time_limit = KernelAttribute(
-        "float",
-        (
-            "Maximum wall-clock time for one full update step [seconds]."
-            + " This can be used to terminate simulations that slow down"
-            + " significantly. Simulations may still get stuck if the slowdown"
-            + " occurs within a single update step"
-        ),
-        default=float("+inf"),
-    )
-    eprop_update_interval = KernelAttribute(
-        "float",
-        ("Task-specific update interval of the e-prop plasticity mechanism [ms]."),
-        default=1000.0,
-    )
-    eprop_learning_window = KernelAttribute(
-        "float",
-        ("Task-specific learning window of the e-prop plasticity mechanism [ms]."),
-        default=1000.0,
-    )
-    eprop_reset_neurons_on_update = KernelAttribute(
-        "bool",
-        ("If True, reset dynamic variables of e-prop neurons upon e-prop update."),
-        default=True,
-    )
-    verbosity = KernelAttribute(
-        "VerbosityLevel",
-        (
-            "Controls NEST's verbosity. The following levels are available,"
-            + " from most to least chatty: ALL, DEBUG, STATUS, INFO,"
-            + " PROGRESS, DEPRECATED, WARNING, ERROR, FATAL, QUIET."
-            + " Default verbosity is INFO. To start NEST with a different verbosity"
-            + " and supress the startup message, set the environment variable PYNEST_QUIET=1"
-        ),
-        default=ll_api.nestkernel.VerbosityLevel.INFO,
-    )
+        `__all__` is built the same way, by importing all of them; that makes
+        `dir(nest)`, `help(nest)` and `from nest import *` complete, at the cost of
+        giving up laziness -- which is what those three ask for anyway.
+        """
+        import importlib
 
-    # Kernel attribute indices, used for fast lookup in `ll_api.py`
-    _kernel_attr_names = builtins.set(k for k, v in vars().items() if isinstance(v, KernelAttribute))
-    _readonly_kernel_attrs = builtins.set(
-        k for k, v in vars().items() if isinstance(v, KernelAttribute) and v._readonly
-    )
+        if attr == "__all__":
+            api = {name for name in vars(self) if not name.startswith("_")}
+            api |= {name for name in dir(type(self)) if not name.startswith("_")}
+            api |= self._submodules()
+            for module in self._api_modules():
+                api |= set(module.__all__)
+            # `NestModule` is reachable as `nest.NestModule` for the documentation
+            # build, but it is machinery rather than API.
+            api -= NestModule._PRIVATE_SUBMODULES | {"NestModule"}
+            self.__dict__["__all__"] = sorted(api)
+            return self.__dict__["__all__"]
+
+        if not attr.startswith("_"):
+            if attr in self._submodules():
+                module = importlib.import_module("." + attr, __name__)
+                self.__dict__[attr] = module
+                return module
+
+            for module in self._api_modules():
+                if attr in module.__all__:
+                    value = getattr(module, attr)
+                    self.__dict__[attr] = value
+                    return value
+
+        raise AttributeError(f"module {__name__!r} has no attribute {attr!r}")
+
+    def __setattr__(self, attr, value):
+        """
+        Route assignment to the descriptor of the same name on `NestModule`, so that
+        `nest.resolution = 0.1` reaches the kernel instead of shadowing the descriptor
+        with an entry in the module dictionary. Names without such a descriptor cannot
+        be assigned; the module namespace is a curated API, not a scratch pad. Use
+        `nest.userdict` to attach data of your own.
+        """
+        # Imported here to keep `types` out of the `nest` namespace.
+        import types
+
+        if isinstance(value, types.ModuleType):
+            # The import machinery attaches submodules to their parent package.
+            self.__dict__[attr] = value
+            return
+
+        descriptor = getattr(type(self), attr, None)
+        if descriptor is None or not hasattr(descriptor, "__set__"):
+            raise AttributeError(f"Cannot set attribute '{attr}' on module 'nest'")
+        descriptor.__set__(self, value)
 
     userdict = {}
     """
@@ -452,100 +240,310 @@ class NestModule(types.ModuleType):
     """
 
 
-def _setattr_error(self, attr, val):
+def _install_kernel_attributes(cls, annotations):
     """
-    When attributes on the `nest` module instance are set, check if it exists on the
-    module type and try to call `__set__` on them. Without this explicit check `nest`s
-    `__setattr__` shadows class attributes and descriptors (such as `KernelAttribute`s).
+    Turn the ``Annotated[<type>, KernelAttribute(...)]`` declarations below into
+    descriptors on `cls`, and record their names for `SetKernelStatus()` to validate
+    against.
 
-    Once this function exists on the `nest` module, new attributes can only be added using
-    `__dict__` manipulation. It is added onto the module at the end of `__init__`,
-    "freezing" the module.
-    """
-    if isinstance(val, types.ModuleType):
-        # Allow import machinery to set imported modules on `nest`
-        self.__dict__[attr] = val
-    else:
-        err = AttributeError(f"Cannot set attribute '{attr}' on module 'nest'")
-        try:
-            cls_attr = getattr(type(self), attr)
-        except AttributeError:
-            raise err from None
-        else:
-            if hasattr(cls_attr, "__set__"):
-                cls_attr.__set__(self, val)
-            else:
-                raise err from None
-
-
-def _rel_import_star(module, import_module_name):
-    """Emulates `from X import *` into `module`"""
-
-    imported = importlib.import_module(import_module_name, __name__)
-    imp_iter = imported.__dict__.items()
-    _dict = module.__dict__
-    if hasattr(imported, "__all__"):
-        # If a public api is defined using the `__all__` attribute, copy that.
-        _dict.update(kv for kv in imp_iter if kv[0] in imported.__all__)
-    else:
-        # Otherwise follow "underscore is private" convention.
-        _dict.update(kv for kv in imp_iter if not kv[0].startswith("_"))
-
-
-def _lazy_module_property(module_name, optional=False, optional_hint=""):
-    """
-    Returns a property that lazy loads a module and substitutes itself with it.
-    The class variable name must match given `module_name`::
-
-      class ModuleClass(types.ModuleType):
-          lazy_module_xy = _lazy_module_property("lazy_module_xy")
-
-    :param module_name: Name of the lazy loadable module.
-    :type module_name: str
-    :param optional: Optional modules raise more descriptive errors.
-    :type optional: bool
-    :param optional_hint: Message appended in case of import errors, to help
-      users install missing optional modules
-    :type optional_hint: str
+    The annotation is the whole declaration of a kernel attribute: its type is what
+    static analysis reports for ``nest.<name>`` and what the ``:type:`` field of the
+    generated docstring shows, and its metadata carries description and defaults.
     """
 
-    def lazy_loader(self):
-        "Wrap lazy loaded property."
-        cls = type(self)
-        delattr(cls, module_name)
-        try:
-            module = importlib.import_module("." + module_name, __name__)
-        except ImportError as e:
-            if optional:
-                raise ImportError(
-                    f"This functionality requires the optional module {module_name}.{optional_hint}"
-                ) from None
-            else:
-                raise e from None
-        setattr(cls, module_name, module)
-        return module
+    attributes = {}
+    for name, annotation in annotations.items():
+        metadata = getattr(annotation, "__metadata__", ())
+        attribute = next((meta for meta in metadata if isinstance(meta, KernelAttribute)), None)  # noqa: F405
+        if attribute is None:
+            continue
+        attribute.bind(name, typing.get_args(annotation)[0])  # noqa: F405
+        setattr(cls, name, attribute)
+        attributes[name] = attribute
 
-    return property(lazy_loader)
+    # Kernel attribute indices, used for fast lookup in `lib/hl_api_simulation.py`
+    cls._kernel_attr_names = frozenset(attributes)
+    cls._readonly_kernel_attrs = frozenset(name for name, a in attributes.items() if a.readonly)
 
 
-# Instantiate a NestModule to replace the nest Python module. Based on
-# https://mail.python.org/pipermail/python-ideas/2012-May/014969.html
-_module = NestModule(__name__)
-# A reference to the class of the module is required for the documentation.
-_module.__dict__["NestModule"] = NestModule
-# Set the nest module object as the return value of `import nest` using sys
-sys.modules[__name__] = _module
-# Some compiled/binary components (`nestkernel_api.pyx` for example) of NEST
-# obtain a reference to this file's original module object instead of what's in
-# `sys.modules`. For these edge cases we make available all attributes of the
-# nest module instance to this file's module object.
-globals().update(_module.__dict__)
+# Define the kernel attributes.
+#
+# FORMATTING NOTES:
+# * The description is dedented and a `.` is appended, so write it as a normal sentence
+#   and indent continuation lines to match the surrounding code.
+# * Strings containing a colon render incorrectly.
 
-# Clean up obsolete references
-# Since these references are deleted, flake8 complains with an error
-# `F821 undefined name` where these variables are used. Hence we mark all those
-# lines with a `# noqa`
-del _rel_import_star, _lazy_module_property, _original_module_attrs
+kernel_status: Annotated[dict, KernelAttribute("Get the complete kernel status", readonly=True)]
+resolution: Annotated[float, KernelAttribute("The resolution of the simulation (in ms)", default=0.1)]
+biological_time: Annotated[float, KernelAttribute("The current simulation time (in ms)")]
+build_info: Annotated[
+    dict, KernelAttribute("Information about the build and compile configuration of NEST", readonly=True)
+]
+memory_size: Annotated[int, KernelAttribute("Memory size of NEST process in kB (-1 if unavailable)", readonly=True)]
+to_do: Annotated[int, KernelAttribute("The number of steps yet to be simulated", readonly=True)]
+max_delay: Annotated[float, KernelAttribute("The maximum delay in the network", default=0.1)]
+min_delay: Annotated[float, KernelAttribute("The minimum delay in the network", default=0.1)]
+ms_per_tic: Annotated[
+    float,
+    KernelAttribute("The number of milliseconds per tic. Calculated by ms_per_tic = 1 / tics_per_ms", readonly=True),
+]
+tics_per_ms: Annotated[
+    float,
+    KernelAttribute(
+        """
+        The number of tics per millisecond. Change of tics_per_ms requires simultaneous
+        specification of resolution
+        """,
+        default=1000.0,
+    ),
+]
+tics_per_step: Annotated[
+    int,
+    KernelAttribute(
+        """
+        The number of tics per simulation time step. Calculated as tics_per_step = resolution *
+        tics_per_ms
+        """,
+        readonly=True,
+    ),
+]
+T_max: Annotated[float, KernelAttribute("The largest representable time value", readonly=True)]
+T_min: Annotated[float, KernelAttribute("The smallest representable time value", readonly=True)]
+rng_types: Annotated[list[str], KernelAttribute("List of available random number generator types", readonly=True)]
+rng_type: Annotated[str, KernelAttribute("Name of random number generator type used by NEST", default="mt19937_64")]
+rng_seed: Annotated[
+    int,
+    KernelAttribute(
+        r"""
+        Seed value used as base for seeding NEST random number generators
+        (:math:`1 \leq s\leq 2^{32}-1`)
+        """,
+        default=143202461,
+    ),
+]
+total_num_virtual_procs: Annotated[int, KernelAttribute("The total number of virtual processes", default=1)]
+local_num_threads: Annotated[int, KernelAttribute("The local number of threads", default=1)]
+num_processes: Annotated[int, KernelAttribute("The number of MPI processes", readonly=True)]
+off_grid_spiking: Annotated[
+    bool, KernelAttribute("Whether to transmit precise spike times in MPI communication", readonly=True)
+]
+adaptive_target_buffers: Annotated[
+    bool, KernelAttribute("Whether MPI buffers for communication of connections resize on the fly", default=True)
+]
+send_buffer_size_secondary_events: Annotated[
+    int,
+    KernelAttribute(
+        """
+        Size of MPI send buffers for communicating secondary events (in bytes, per MPI rank, for
+        developers)
+        """,
+        readonly=True,
+    ),
+]
+recv_buffer_size_secondary_events: Annotated[
+    int,
+    KernelAttribute(
+        """
+        Size of MPI recv buffers for communicating secondary events (in bytes, per MPI rank, for
+        developers)
+        """,
+        readonly=True,
+    ),
+]
+buffer_size_spike_data: Annotated[
+    int, KernelAttribute("Total size of MPI buffer for communication of spikes", default=2)
+]
+buffer_size_target_data: Annotated[
+    int, KernelAttribute("Total size of MPI buffer for communication of connections", default=2)
+]
+growth_factor_buffer_target_data: Annotated[
+    float,
+    KernelAttribute(
+        """
+        If MPI buffers for communication of connections resize on the fly, grow them by this factor
+        each round
+        """,
+        default=1.5,
+    ),
+]
+max_buffer_size_target_data: Annotated[
+    int, KernelAttribute("Maximal size of MPI buffers for communication of connections", default=16777216)
+]
+spike_buffer_grow_extra: Annotated[
+    float,
+    KernelAttribute(
+        """
+        When spike exchange buffer is expanded, resize it to `(1 + spike_buffer_grow_extra) *
+        required_buffer_size`
+        """,
+        default=0.5,
+    ),
+]
+spike_buffer_shrink_limit: Annotated[
+    float,
+    KernelAttribute(
+        """
+        If the largest number of spikes sent from any rank to any rank is less than
+        `spike_buffer_shrink_limit * buffer_size`, then reduce buffer size.
+        `spike_buffer_shrink_limit == 0` means that buffers never shrink. See
+        ``spike_buffer_shrink_spare`` for how the new buffer size is determined
+        """,
+        default=0.2,
+    ),
+]
+spike_buffer_shrink_spare: Annotated[
+    float,
+    KernelAttribute(
+        """
+        When the buffer shrinks, set the new size to `(1 + spike_buffer_shrink_spare) *
+        required_buffer_size`. See `spike_buffer_shrink_limit` for when buffers shrink
+        """,
+        default=0.1,
+    ),
+]
+spike_buffer_resize_log: Annotated[
+    dict,
+    KernelAttribute(
+        """
+        Log of spike buffer resizing as a dictionary. It contains the `times` of the resizings
+        (simulation clock in steps, always multiple of ``min_delay``), ``global_max_spikes_sent``,
+        that is, the observed spike number that triggered the resize, and the ``new_buffer_size``.
+        Sizes for the buffer section sent from one rank to another rank
+        """,
+        readonly=True,
+    ),
+]
+cycle_time_log: Annotated[
+    dict, KernelAttribute("Information on the duration and spike counts within each update cycle.", readonly=True)
+]
+use_wfr: Annotated[bool, KernelAttribute("Whether to use waveform relaxation method", default=True)]
+wfr_comm_interval: Annotated[float, KernelAttribute("Desired waveform relaxation communication interval", default=1.0)]
+wfr_tol: Annotated[float, KernelAttribute("Convergence tolerance of waveform relaxation method", default=0.0001)]
+wfr_max_iterations: Annotated[
+    int, KernelAttribute("Maximal number of iterations used for waveform relaxation", default=15)
+]
+wfr_interpolation_order: Annotated[
+    int, KernelAttribute("Interpolation order of polynomial used in wfr iterations", default=3)
+]
+max_num_syn_models: Annotated[int, KernelAttribute("Maximal number of synapse models supported", readonly=True)]
+structural_plasticity_synapses: Annotated[
+    dict,
+    KernelAttribute(
+        """
+        Defines all synapses which are plastic for the structural plasticity algorithm. Each entry
+        in the dictionary is composed of a synapse model, the presynaptic element and the
+        postsynaptic element
+        """,
+    ),
+]
+structural_plasticity_update_interval: Annotated[
+    int,
+    KernelAttribute(
+        """
+        Defines the time interval in ms at which the structural plasticity manager will make changes
+        in the structure of the network ( creation and deletion of plastic synapses)
+        """,
+        default=10000,
+    ),
+]
+growth_curves: Annotated[
+    list[str], KernelAttribute("The list of the available structural plasticity growth curves", readonly=True)
+]
+use_compressed_spikes: Annotated[
+    bool,
+    KernelAttribute(
+        """
+        Whether to use spike compression; if a neuron has targets on multiple threads of a process,
+        this switch makes sure that only a single packet is sent to the process instead of one
+        packet per target thread; it implies that connections are sorted by source.
+        """,
+        default=True,
+    ),
+]
+data_path: Annotated[str, KernelAttribute("A path, where all data is written to, defaults to current directory")]
+data_prefix: Annotated[str, KernelAttribute("A common prefix for all data files")]
+overwrite_files: Annotated[bool, KernelAttribute("Whether to overwrite existing data files", default=False)]
+print_time: Annotated[
+    bool, KernelAttribute("Whether to print progress information during the simulation", default=False)
+]
+network_size: Annotated[int, KernelAttribute("The number of nodes in the network", readonly=True)]
+num_connections: Annotated[
+    int, KernelAttribute("The number of connections in the network", readonly=True, localonly=True)
+]
+connection_rules: Annotated[list[str], KernelAttribute("The list of available connection rules", readonly=True)]
+node_models: Annotated[
+    list[str], KernelAttribute("The list of the available node (i.e., neuron or device) models", readonly=True)
+]
+synapse_models: Annotated[list[str], KernelAttribute("The list of the available synapse models", readonly=True)]
+local_spike_counter: Annotated[
+    int,
+    KernelAttribute(
+        """
+        Number of spikes fired by neurons on a given MPI rank during the most recent call to
+        :py:func:`.Simulate`. Only spikes from "normal" neurons are counted, not spikes generated by
+        devices such as ``poisson_generator``. Resets on each call to ``Simulate`` or ``Run``.
+        """,
+        readonly=True,
+    ),
+]
+recording_backends: Annotated[
+    list[str], KernelAttribute("List of available backends for recording devices", readonly=True)
+]
+stimulation_backends: Annotated[
+    list[str], KernelAttribute("List of available backends for stimulation devices", readonly=True)
+]
+dict_miss_is_error: Annotated[
+    bool, KernelAttribute("Whether missed dictionary entries are treated as errors", default=True)
+]
+keep_source_table: Annotated[
+    bool, KernelAttribute("Whether to keep source table after connection setup is complete", default=True)
+]
+min_update_time: Annotated[
+    float, KernelAttribute("Shortest wall-clock time measured so far for a full update step [seconds]", readonly=True)
+]
+max_update_time: Annotated[
+    float, KernelAttribute("Longest wall-clock time measured so far for a full update step [seconds]", readonly=True)
+]
+update_time_limit: Annotated[
+    float,
+    KernelAttribute(
+        """
+        Maximum wall-clock time for one full update step [seconds]. This can be used to terminate
+        simulations that slow down significantly. Simulations may still get stuck if the slowdown
+        occurs within a single update step
+        """,
+        default=float("+inf"),
+    ),
+]
+eprop_update_interval: Annotated[
+    float, KernelAttribute("Task-specific update interval of the e-prop plasticity mechanism [ms].", default=1000.0)
+]
+eprop_learning_window: Annotated[
+    float, KernelAttribute("Task-specific learning window of the e-prop plasticity mechanism [ms].", default=1000.0)
+]
+eprop_reset_neurons_on_update: Annotated[
+    bool, KernelAttribute("If True, reset dynamic variables of e-prop neurons upon e-prop update.", default=True)
+]
+verbosity: Annotated[
+    _ll_api.nestkernel.VerbosityLevel,
+    KernelAttribute(
+        """
+        Controls NEST's verbosity. The following levels are available, from most to least chatty:
+        ALL, DEBUG, STATUS, INFO, PROGRESS, DEPRECATED, WARNING, ERROR, FATAL, QUIET. Default
+        verbosity is INFO. To start NEST with a different verbosity and supress the startup message,
+        set the environment variable PYNEST_QUIET=1
+        """,
+        default=_ll_api.nestkernel.VerbosityLevel.INFO,
+    ),
+]
 
+_install_kernel_attributes(NestModule, __annotations__)
 
-del _module
+__version__ = _ll_api.nestkernel.llapi_get_kernel_status()["build_info"]["version"]
+
+# Retype the module object, putting the kernel attribute descriptors in force.
+sys.modules[__name__].__class__ = NestModule
+
+# What is left in this file's namespace is the `nest` namespace, so drop the scaffolding
+# this file needed to build it.
+del sys, types, typing, Annotated, KernelAttribute, _ll_api, _install_kernel_attributes

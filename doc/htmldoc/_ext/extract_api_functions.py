@@ -46,11 +46,9 @@ def find_all_variables(file_path):
         with open(file_path, "r") as init_file:
             file_content = init_file.read()
 
-        # Find the class definition
-        match = re.search(r"class\s+NestModule\(.*?\):", file_content, re.DOTALL)
-        if match:
-            # Find the variable assignments within the class
-            all_variables = re.findall(r"(\w+)\s*=\s*KernelAttribute", file_content)
+        # Kernel attributes are declared as annotations whose metadata is a
+        # ``KernelAttribute``; see ``_install_kernel_attributes`` in ``nest/__init__.py``.
+        all_variables = re.findall(r"^(\w+)\s*:\s*Annotated\[", file_content, re.MULTILINE)
 
     with open(file_path, "r") as file:
         try:

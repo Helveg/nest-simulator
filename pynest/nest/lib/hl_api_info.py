@@ -31,13 +31,7 @@ import webbrowser
 import nest
 
 from .. import nestkernel_api as nestkernel
-from .hl_api_helper import (
-    broadcast,
-    deprecated,
-    is_iterable,
-    load_help,
-    show_help_with_pager,
-)
+from .hl_api_helper import broadcast, deprecated, is_iterable, load_help, show_help_with_pager
 from .hl_api_types import to_json
 
 __all__ = ["GetStatus", "help", "SetStatus", "VerbosityLevel", "message", "get_verbosity", "set_verbosity"]
@@ -77,9 +71,13 @@ def help(obj=None, return_text=False):
             else:
                 show_help_with_pager(obj)
         except FileNotFoundError:
-            print(textwrap.dedent(f"""
+            print(
+                textwrap.dedent(
+                    f"""
                 Sorry, there is no help for model '{obj}'.
-                Use the Python help() function to obtain help on PyNEST functions."""))
+                Use the Python help() function to obtain help on PyNEST functions."""
+                )
+            )
     else:
         print(nest.__doc__)
 
@@ -137,7 +135,7 @@ def SetStatus(nodes_or_conns, params, val=None):
 
 def message(
     message,
-    severity=nest.NestModule.ll_api.nestkernel.VerbosityLevel.INFO,
+    severity=nestkernel.VerbosityLevel.INFO,
     *,
     function=None,
     filename=None,
@@ -165,13 +163,13 @@ def message(
 def get_verbosity():
     """Return numeric value for NEST verbosity"""
 
-    return int(nest.NestModule.ll_api.nestkernel.llapi_get_kernel_status()["verbosity"])
+    return int(nestkernel.llapi_get_kernel_status()["verbosity"])
 
 
 @deprecated("", "Provided for backward compatibility only. Set `nest.verbosity = nest.VerbosityLevel.XYZ` instead.")
 def set_verbosity(level):
     """Change verbosity level for NEST's messages."""
 
-    nest.NestModule.ll_api.nestkernel.llapi_set_kernel_status(
+    nestkernel.llapi_set_kernel_status(
         {"verbosity": getattr(nestkernel.VerbosityLevel, level.split("_")[1])}
     )  # level must be of form "M_XYZ"
