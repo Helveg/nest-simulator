@@ -40,83 +40,93 @@ r"""PyNEST - Python interface for the NEST Simulator
 For more information visit https://www.nest-simulator.org.
 """
 
-# WARINIG: Since this file uses a ton of trickery, linter warnings are mostly
-# disabled. This means that you need to make sure style is fine yourself!!!
+# `nest` is more than a namespace: kernel attributes such as `nest.resolution` read
+# from and write to the running kernel. That requires descriptors, and descriptors
+# only fire when they are found on an object's *type*, so at the bottom of this file
+# the module object is given the `NestModule` type defined below (PEP 562). Retyping
+# the module object the interpreter already created -- rather than replacing it --
+# keeps `import nest` pointing at one and the same object everywhere, including in
+# the compiled `pynestkernel` extension and in the `hl_api` modules imported below,
+# which run while this file is still executing.
 #
-# pylint: disable=wrong-import-position, no-name-in-module, undefined-variable
-# pylint: disable=invalid-name, protected-access
+# The type is also where the submodules live, as `_LazySubmodule` descriptors, so that
+# `import nest` only costs the kernel plus the `hl_api` API surface.
+#
+# pylint: disable=wildcard-import, unused-wildcard-import, no-name-in-module, invalid-name
 
-# WARNING: This file is only used to create the `NestModule` below and then
-# ignored. If you'd like to make changes to the root `nest` module, they need to
-# be made to the `NestModule` class/instance instead.
+import sys
+import types
 
-################
-
-# Store interpreter-given module attributes to copy into replacement module
-# instance later on. Use `.copy()` to prevent pollution with other variables
-_original_module_attrs = globals().copy()
-
-import builtins  # noqa
-import importlib  # noqa
-import sys  # noqa
-import types  # noqa
-
-from .ll_api_kernel_attributes import KernelAttribute  # noqa
+from . import ll_api as _ll_api  # noqa: F401  (importing `ll_api` starts the kernel)
+from .lib.hl_api_connections import *  # noqa: F401,F403
+from .lib.hl_api_exceptions import *  # noqa: F401,F403
+from .lib.hl_api_info import *  # noqa: F401,F403
+from .lib.hl_api_models import *  # noqa: F401,F403
+from .lib.hl_api_nodes import *  # noqa: F401,F403
+from .lib.hl_api_parallel_computing import *  # noqa: F401,F403
+from .lib.hl_api_simulation import *  # noqa: F401,F403
+from .lib.hl_api_sonata import *  # noqa: F401,F403
+from .lib.hl_api_spatial import *  # noqa: F401,F403
+from .lib.hl_api_types import *  # noqa: F401,F403
+from .ll_api import set_communicator  # noqa: F401
+from .ll_api_kernel_attributes import KernelAttribute
 
 try:
-    import versionchecker  # noqa: F401
+    # Bound under a private name so that it stays out of the `nest` API.
+    import versionchecker as _versionchecker  # noqa: F401
 except ImportError:
     pass
 
 
+class _LazySubmodule:
+    """
+    Descriptor that imports a submodule on first attribute access and then replaces
+    itself on the class with the imported module. Keeps ``import nest`` from paying
+    for submodules the script never touches, and keeps submodules with optional
+    third-party dependencies importable only by the users who have those installed.
+
+    The submodule is named after the attribute unless `module_name` says otherwise.
+    """
+
+    def __init__(self, module_name=None):
+        self._module_name = module_name
+
+    def __set_name__(self, cls, name):
+        self._name = name
+        if self._module_name is None:
+            self._module_name = name
+
+    def __get__(self, instance, cls):
+        # Imported here to keep `importlib` out of the `nest` namespace.
+        import importlib
+
+        module = importlib.import_module("." + self._module_name, __name__)
+        setattr(cls, self._name, module)
+        return module
+
+
 class NestModule(types.ModuleType):
     """
-    A module class for the ``nest`` root module to control the dynamic generation
-    of module level attributes such as the KernelAttributes, lazy loading
-    some submodules and importing the public APIs of the `lib` submodules.
+    Type of the ``nest`` root module.
+
+    The kernel attributes below are descriptors: reading ``nest.<attribute>`` reads the
+    status of the running NEST kernel and assigning to it writes that status.
+    Descriptors are only honoured when they live on a type, which is why the ``nest``
+    module object is given this type rather than plain ``ModuleType``.
     """
 
-    from . import ll_api  # noqa
-    from . import logic  # noqa
-    from . import math  # noqa
-    from . import random  # noqa
-    from . import spatial_distributions  # noqa
-    from . import pynestkernel as kernel  # noqa
-    from .ll_api import set_communicator
-
-    def __init__(self, name):
-        super().__init__(name)
-        # Copy over the original module attributes to preserve all interpreter-given
-        # magic attributes such as `__name__`, `__path__`, `__package__`, ...
-        self.__dict__.update(_original_module_attrs)  # noqa
-
-        # Import public APIs of submodules into the `nest.` namespace
-        _rel_import_star(self, ".lib.hl_api_connections")  # noqa: F821
-        _rel_import_star(self, ".lib.hl_api_exceptions")  # noqa: F821
-        _rel_import_star(self, ".lib.hl_api_info")  # noqa: F821
-        _rel_import_star(self, ".lib.hl_api_models")  # noqa: F821
-        _rel_import_star(self, ".lib.hl_api_nodes")  # noqa: F821
-        _rel_import_star(self, ".lib.hl_api_parallel_computing")  # noqa: F821
-        _rel_import_star(self, ".lib.hl_api_simulation")  # noqa: F821
-        _rel_import_star(self, ".lib.hl_api_sonata")  # noqa: F821
-        _rel_import_star(self, ".lib.hl_api_spatial")  # noqa: F821
-        _rel_import_star(self, ".lib.hl_api_types")  # noqa: F821
-
-        # Lazy loaded modules. They are descriptors, so add them to the type object
-        type(self).raster_plot = _lazy_module_property("raster_plot")  # noqa: F821
-        type(self).server = _lazy_module_property("server")  # noqa: F821
-        type(self).spatial = _lazy_module_property("spatial")  # noqa: F821
-        type(self).visualization = _lazy_module_property("visualization")  # noqa: F821
-        type(self).voltage_trace = _lazy_module_property("voltage_trace")  # noqa: F821
-
-        self.__version__ = ll_api.sli_func("statusdict /version get")  # noqa: F821
-        # Finalize the nest module with a public API.
-        _api = list(k for k in self.__dict__ if not k.startswith("_"))
-        _api.extend(k for k in dir(type(self)) if not k.startswith("_"))
-        self.__all__ = list(set(_api))
-
-        # Block setting of unknown attributes
-        type(self).__setattr__ = _setattr_error
+    # Every submodule reachable as `nest.<name>` is resolved on attribute access.
+    kernel = _LazySubmodule("pynestkernel")
+    ll_api = _LazySubmodule()
+    logic = _LazySubmodule()
+    math = _LazySubmodule()
+    random = _LazySubmodule()
+    raster_plot = _LazySubmodule()
+    server = _LazySubmodule()
+    spatial = _LazySubmodule()
+    spatial_distributions = _LazySubmodule()
+    visualization = _LazySubmodule()
+    voltage_trace = _LazySubmodule()
 
     def set(self, **kwargs):
         "Forward kernel attribute setting to `SetKernelStatus()`."
@@ -133,14 +143,33 @@ class NestModule(types.ModuleType):
     def __dir__(self):
         return list(set(vars(self).keys()) | set(self.__all__))
 
+    def __setattr__(self, attr, value):
+        """
+        Route assignment to the descriptor of the same name on `NestModule`, so that
+        `nest.resolution = 0.1` reaches the kernel instead of shadowing the descriptor
+        with an entry in the module dictionary. Names without such a descriptor cannot
+        be assigned; the module namespace is a curated API, not a scratch pad. Use
+        `nest.userdict` to attach data of your own.
+        """
+        # Imported here to keep `types` out of the `nest` namespace.
+        import types
+
+        if isinstance(value, types.ModuleType):
+            # The import machinery attaches submodules to their parent package.
+            self.__dict__[attr] = value
+            return
+
+        descriptor = getattr(type(self), attr, None)
+        if descriptor is None or not hasattr(descriptor, "__set__"):
+            raise AttributeError(f"Cannot set attribute '{attr}' on module 'nest'")
+        descriptor.__set__(self, value)
+
     # Define the kernel attributes.
     #
     # FORMATTING NOTES:
-    # * Multiline strings render incorrectly, join multiple single-quote
-    #   strings instead.
-    # * Strings containing `:` render incorrectly.
-    # * Do not end docstrings with punctuation. A `.` or `,` is added by the
-    #   formatting logic.
+    # * The description is dedented and a `.` is appended, so write it as a normal
+    #   sentence and indent continuation lines to match the surrounding code.
+    # * Strings containing a colon render incorrectly.
 
     kernel_status = KernelAttribute("dict", "Get the complete kernel status", readonly=True)
     resolution = KernelAttribute("float", "The resolution of the simulation (in ms)", default=0.1)
@@ -150,15 +179,15 @@ class NestModule(types.ModuleType):
     min_delay = KernelAttribute("float", "The minimum delay in the network", default=0.1)
     ms_per_tic = KernelAttribute(
         "float",
-        ("The number of milliseconds per tic. Calculated by " + "ms_per_tic = 1 / tics_per_ms"),
+        "The number of milliseconds per tic. Calculated by ms_per_tic = 1 / tics_per_ms",
         readonly=True,
     )
     tics_per_ms = KernelAttribute(
         "float",
-        (
-            "The number of tics per millisecond. Change of tics_per_ms "
-            + "requires simultaneous specification of resolution"
-        ),
+        """
+        The number of tics per millisecond. Change of tics_per_ms requires simultaneous
+        specification of resolution
+        """,
         default=1000.0,
     )
     tics_per_step = KernelAttribute(
@@ -180,7 +209,7 @@ class NestModule(types.ModuleType):
     )
     rng_seed = KernelAttribute(
         "int",
-        ("Seed value used as base for seeding NEST random number generators " + r"(:math:`1 \leq s\leq 2^{32}-1`)"),
+        r"Seed value used as base for seeding NEST random number generators (:math:`1 \leq s\leq 2^{32}-1`)",
         default=143202461,
     )
     total_num_virtual_procs = KernelAttribute("int", "The total number of virtual processes", default=1)
@@ -198,12 +227,18 @@ class NestModule(types.ModuleType):
     )
     send_buffer_size_secondary_events = KernelAttribute(
         "int",
-        ("Size of MPI send buffers for communicating secondary events " + "(in bytes, per MPI rank, for developers)"),
+        """
+        Size of MPI send buffers for communicating secondary events (in bytes, per MPI
+        rank, for developers)
+        """,
         readonly=True,
     )
     recv_buffer_size_secondary_events = KernelAttribute(
         "int",
-        ("Size of MPI recv buffers for communicating secondary events " + "(in bytes, per MPI rank, for developers)"),
+        """
+        Size of MPI recv buffers for communicating secondary events (in bytes, per MPI
+        rank, for developers)
+        """,
         readonly=True,
     )
     buffer_size_spike_data = KernelAttribute(
@@ -218,7 +253,10 @@ class NestModule(types.ModuleType):
     )
     growth_factor_buffer_target_data = KernelAttribute(
         "float",
-        ("If MPI buffers for communication of connections resize on the " + "fly, grow them by this factor each round"),
+        """
+        If MPI buffers for communication of connections resize on the fly, grow them by
+        this factor each round
+        """,
         default=1.5,
     )
     max_buffer_size_target_data = KernelAttribute(
@@ -228,37 +266,40 @@ class NestModule(types.ModuleType):
     )
     spike_buffer_grow_extra = KernelAttribute(
         "float",
-        "When spike exchange buffer is expanded, resize it to "
-        + "`(1 + spike_buffer_grow_extra) * required_buffer_size`",
+        """
+        When spike exchange buffer is expanded, resize it to
+        `(1 + spike_buffer_grow_extra) * required_buffer_size`
+        """,
         default=0.5,
     )
     spike_buffer_shrink_limit = KernelAttribute(
         "float",
-        (
-            "If the largest number of spikes sent from any rank to any rank is less than "
-            + "`spike_buffer_shrink_limit * buffer_size`, then reduce buffer size. "
-            + "`spike_buffer_shrink_limit == 0` means that buffers never shrink. "
-            + "See ``spike_buffer_shrink_spare`` for how the new buffer size is determined"
-        ),
+        """
+        If the largest number of spikes sent from any rank to any rank is less than
+        `spike_buffer_shrink_limit * buffer_size`, then reduce buffer size.
+        `spike_buffer_shrink_limit == 0` means that buffers never shrink.
+        See ``spike_buffer_shrink_spare`` for how the new buffer size is determined
+        """,
         default=0.2,
     )
     spike_buffer_shrink_spare = KernelAttribute(
         "float",
-        (
-            "When the buffer shrinks, set the new size to "
-            + "`(1 + spike_buffer_shrink_spare) * required_buffer_size`. "
-            + "See `spike_buffer_shrink_limit` for when buffers shrink"
-        ),
+        """
+        When the buffer shrinks, set the new size to
+        `(1 + spike_buffer_shrink_spare) * required_buffer_size`.
+        See `spike_buffer_shrink_limit` for when buffers shrink
+        """,
         default=0.1,
     )
     spike_buffer_resize_log = KernelAttribute(
         "dict",
-        (
-            "Log of spike buffer resizing as a dictionary. It contains the "
-            + "`times` of the resizings (simulation clock in steps, always multiple of ``min_delay``), "
-            + "``global_max_spikes_sent``, that is, the observed spike number that triggered the resize, "
-            + "and the ``new_buffer_size``. Sizes for the buffer section sent from one rank to another rank"
-        ),
+        """
+        Log of spike buffer resizing as a dictionary. It contains the `times` of the
+        resizings (simulation clock in steps, always multiple of ``min_delay``),
+        ``global_max_spikes_sent``, that is, the observed spike number that triggered
+        the resize, and the ``new_buffer_size``. Sizes for the buffer section sent from
+        one rank to another rank
+        """,
         readonly=True,
     )
 
@@ -284,20 +325,19 @@ class NestModule(types.ModuleType):
     max_num_syn_models = KernelAttribute("int", "Maximal number of synapse models supported", readonly=True)
     structural_plasticity_synapses = KernelAttribute(
         "dict",
-        (
-            "Defines all synapses which are plastic for the structural"
-            + " plasticity algorithm. Each entry in the dictionary is composed"
-            + " of a synapse model, the presynaptic element and the"
-            + " postsynaptic element"
-        ),
+        """
+        Defines all synapses which are plastic for the structural plasticity algorithm.
+        Each entry in the dictionary is composed of a synapse model, the presynaptic
+        element and the postsynaptic element
+        """,
     )
     structural_plasticity_update_interval = KernelAttribute(
         "int",
-        (
-            "Defines the time interval in ms at which the structural plasticity"
-            + " manager will make changes in the structure of the network ("
-            + " creation and deletion of plastic synapses)"
-        ),
+        """
+        Defines the time interval in ms at which the structural plasticity manager will
+        make changes in the structure of the network ( creation and deletion of plastic
+        synapses)
+        """,
         default=10000,
     )
     growth_curves = KernelAttribute(
@@ -307,12 +347,12 @@ class NestModule(types.ModuleType):
     )
     use_compressed_spikes = KernelAttribute(
         "bool",
-        (
-            "Whether to use spike compression; if a neuron has targets on"
-            + " multiple threads of a process, this switch makes sure that only"
-            + " a single packet is sent to the process instead of one packet"
-            + " per target thread; it implies that connections are sorted by source."
-        ),
+        """
+        Whether to use spike compression; if a neuron has targets on multiple threads of
+        a process, this switch makes sure that only a single packet is sent to the
+        process instead of one packet per target thread; it implies that connections are
+        sorted by source.
+        """,
         default=True,
     )
     data_path = KernelAttribute(
@@ -350,12 +390,12 @@ class NestModule(types.ModuleType):
     )
     local_spike_counter = KernelAttribute(
         "int",
-        (
-            "Number of spikes fired by neurons on a given MPI rank during the"
-            + " most recent call to :py:func:`.Simulate`. Only spikes from"
-            + ' "normal" neurons are counted, not spikes generated by devices'
-            + " such as ``poisson_generator``. Resets on each call to ``Simulate`` or ``Run``."
-        ),
+        """
+        Number of spikes fired by neurons on a given MPI rank during the most recent
+        call to :py:func:`.Simulate`. Only spikes from "normal" neurons are counted, not
+        spikes generated by devices such as ``poisson_generator``. Resets on each call
+        to ``Simulate`` or ``Run``.
+        """,
         readonly=True,
     )
     recording_backends = KernelAttribute(
@@ -390,34 +430,31 @@ class NestModule(types.ModuleType):
     )
     update_time_limit = KernelAttribute(
         "float",
-        (
-            "Maximum wall-clock time for one full update step [seconds]."
-            + " This can be used to terminate simulations that slow down"
-            + " significantly. Simulations may still get stuck if the slowdown"
-            + " occurs within a single update step"
-        ),
+        """
+        Maximum wall-clock time for one full update step [seconds]. This can be used to
+        terminate simulations that slow down significantly. Simulations may still get
+        stuck if the slowdown occurs within a single update step
+        """,
         default=float("+inf"),
     )
     eprop_update_interval = KernelAttribute(
         "float",
-        ("Task-specific update interval of the e-prop plasticity mechanism [ms]."),
+        "Task-specific update interval of the e-prop plasticity mechanism [ms].",
         default=1000.0,
     )
     eprop_learning_window = KernelAttribute(
         "float",
-        ("Task-specific learning window of the e-prop plasticity mechanism [ms]."),
+        "Task-specific learning window of the e-prop plasticity mechanism [ms].",
         default=1000.0,
     )
     eprop_reset_neurons_on_update = KernelAttribute(
         "bool",
-        ("If True, reset dynamic variables of e-prop neurons upon e-prop update."),
+        "If True, reset dynamic variables of e-prop neurons upon e-prop update.",
         default=True,
     )
-    # Kernel attribute indices, used for fast lookup in `ll_api.py`
-    _kernel_attr_names = builtins.set(k for k, v in vars().items() if isinstance(v, KernelAttribute))
-    _readonly_kernel_attrs = builtins.set(
-        k for k, v in vars().items() if isinstance(v, KernelAttribute) and v._readonly
-    )
+    # Kernel attribute indices, used for fast lookup in `lib/hl_api_simulation.py`
+    _kernel_attr_names = frozenset(k for k, v in vars().items() if isinstance(v, KernelAttribute))
+    _readonly_kernel_attrs = frozenset(k for k, v in vars().items() if isinstance(v, KernelAttribute) and v.readonly)
 
     userdict = {}
     """
@@ -427,98 +464,24 @@ class NestModule(types.ModuleType):
     """
 
 
-def _setattr_error(self, attr, val):
-    """
-    When attributes on the `nest` module instance are set, check if it exists on the
-    module type and try to call `__set__` on them. Without this explicit check `nest`s
-    `__setattr__` shadows class attributes and descriptors (such as `KernelAttribute`s).
+__version__ = _ll_api.sli_func("statusdict /version get")
 
-    Once this function exists on the `nest` module, new attributes can only be added using
-    `__dict__` manipulation. It is added onto the module at the end of `__init__`,
-    "freezing" the module.
-    """
-    if isinstance(val, types.ModuleType):
-        # Allow import machinery to set imported modules on `nest`
-        self.__dict__[attr] = val
-    else:
-        err = AttributeError(f"Cannot set attribute '{attr}' on module 'nest'")
-        try:
-            cls_attr = getattr(type(self), attr)
-        except AttributeError:
-            raise err from None
-        else:
-            if hasattr(cls_attr, "__set__"):
-                cls_attr.__set__(self, val)
-            else:
-                raise err from None
+# Retype the module object, putting the kernel attribute descriptors in force.
+sys.modules[__name__].__class__ = NestModule
 
+# What is left in this file's namespace is the `nest` namespace, so drop the scaffolding
+# of this file, along with the packages that the import machinery attached to `nest` as
+# a side effect of the imports above but that are not part of the API.
+del sys, types, KernelAttribute, _LazySubmodule, _ll_api
+del lib, ll_api_kernel_attributes, pynestkernel  # noqa: F821
 
-def _rel_import_star(module, import_module_name):
-    """Emulates `from X import *` into `module`"""
-
-    imported = importlib.import_module(import_module_name, __name__)
-    imp_iter = imported.__dict__.items()
-    _dict = module.__dict__
-    if hasattr(imported, "__all__"):
-        # If a public api is defined using the `__all__` attribute, copy that.
-        _dict.update(kv for kv in imp_iter if kv[0] in imported.__all__)
-    else:
-        # Otherwise follow "underscore is private" convention.
-        _dict.update(kv for kv in imp_iter if not kv[0].startswith("_"))
-
-
-def _lazy_module_property(module_name, optional=False, optional_hint=""):
-    """
-    Returns a property that lazy loads a module and substitutes itself with it.
-    The class variable name must match given `module_name`::
-
-      class ModuleClass(types.ModuleType):
-          lazy_module_xy = _lazy_module_property("lazy_module_xy")
-
-    :param module_name: Name of the lazy loadable module.
-    :type module_name: str
-    :param optional: Optional modules raise more descriptive errors.
-    :type optional: bool
-    :param optional_hint: Message appended in case of import errors, to help
-      users install missing optional modules
-    :type optional_hint: str
-    """
-
-    def lazy_loader(self):
-        "Wrap lazy loaded property."
-        cls = type(self)
-        delattr(cls, module_name)
-        try:
-            module = importlib.import_module("." + module_name, __name__)
-        except ImportError as e:
-            if optional:
-                raise ImportError(
-                    f"This functionality requires the optional module \
-                    {module_name}.{optional_hint}"
-                ) from None
-            else:
-                raise e from None
-        setattr(cls, module_name, module)
-        return module
-
-    return property(lazy_loader)
-
-
-# Instantiate a NestModule to replace the nest Python module. Based on
-# https://mail.python.org/pipermail/python-ideas/2012-May/014969.html
-_module = NestModule(__name__)
-# A reference to the class of the module is required for the documentation.
-_module.__dict__["NestModule"] = NestModule
-# Set the nest module object as the return value of `import nest` using sys
-sys.modules[__name__] = _module
-# Some compiled/binary components (`pynestkernel.pyx` for example) of NEST
-# obtain a reference to this file's original module object instead of what's in
-# `sys.modules`. For these edge cases we make available all attributes of the
-# nest module instance to this file's module object.
-globals().update(_module.__dict__)
-
-# Clean up obsolete references
-# Since these references are deleted, flake8 complains with an error
-# `F821 undefined name` where these variables are used. Hence we mark all those
-# lines with a `# noqa`
-del _rel_import_star, _lazy_module_property, _module, _original_module_attrs
+# The API is what this file exports, plus what `NestModule` adds: the kernel attributes,
+# `get`/`set` and the lazily imported submodules. `NestModule` itself is an
+# implementation detail that is only exposed for the documentation build.
+__all__ = sorted(
+    (
+        {name for name in globals() if not name.startswith("_")}
+        | {name for name in dir(NestModule) if not name.startswith("_")}
+    )
+    - {"NestModule"}
+)

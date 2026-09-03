@@ -37,6 +37,12 @@ class NESTMappedException(type):
         re-use where cls is actually the class that triggered the getattr (the class that
         NESTMappedException is a metaclass of)."""
 
+        # `inspect` (and through it `pydoc`/`help()`) asks the metaclass for every name in
+        # `dir(cls)`, not just for the missing ones. Fabricating an exception for a name the
+        # class already carries would overwrite it, so only unknown, public names are mapped.
+        if errorname.startswith("_") or any(errorname in vars(klass) for klass in cls.__mro__):
+            raise AttributeError(errorname)
+
         # Dynamic class construction, first check if we know its parent
         if errorname in cls.parents:
             parent = getattr(cls, cls.parents[errorname])

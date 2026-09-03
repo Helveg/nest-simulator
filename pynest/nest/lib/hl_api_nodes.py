@@ -99,9 +99,7 @@ def Create(model, n=1, params=None, positions=None):
         iterable_or_parameter_in_params = any(is_iterable(v) or isinstance(v, Parameter) for k, v in params.items())
 
     if positions is not None:
-        # Explicitly retrieve lazy loaded spatial property from the module class.
-        # This is needed because the automatic lookup fails. See #2135.
-        spatial = getattr(nest.NestModule, "spatial")
+        spatial = nest.spatial
         # We only accept positions as either a free object or a grid object.
         if not isinstance(positions, (spatial.free, spatial.grid)):
             raise TypeError("`positions` must be either a nest.spatial.free or a nest.spatial.grid object")

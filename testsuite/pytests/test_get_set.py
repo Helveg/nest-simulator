@@ -61,7 +61,7 @@ class TestNestGetSet(unittest.TestCase):
         # defaults. Test should also error if there is a problem in general with the
         # `.get` mechanism.
         kst = nest.get("keep_source_table")
-        self.assertEqual(type(nest).keep_source_table._default, kst, "get value not equal to default after ResetKernel")
+        self.assertEqual(type(nest).keep_source_table.default, kst, "get value not equal to default after ResetKernel")
         self.assertEqual(kst, nest.keep_source_table, "kernel attribute value not equal to get value")
         # Getting the value of unknown attributes should error. The test should also error if there is
         # a problem with possible `__getattr__` implementations.
