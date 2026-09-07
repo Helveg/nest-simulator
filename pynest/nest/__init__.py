@@ -43,8 +43,10 @@ For more information visit https://www.nest-simulator.org.
 # The `nest` module is a container of lazily imported submodules, lazily loaded
 # attribute shortcuts to said submodules, and kernel attributes (which read and write
 # kernel values). The dynamic behaviour of the module is achieved by retyping this
-# module object to the `NestModule` type defined below (see PEP 562). There are two
-# main dynamic behaviours:
+# module object to the `NestModule` type defined below. Assigning a module's
+# `__class__` is supported for exactly this purpose since Python 3.5; see
+# https://docs.python.org/3/reference/datamodel.html#customizing-module-attribute-access.
+# There are two main dynamic behaviours:
 #
 # 1. Submodule attribute shortcuts
 # --------------------------------
@@ -61,18 +63,19 @@ For more information visit https://www.nest-simulator.org.
 # `__all__` and the submodule that defines them. The map is read from the sources, so
 # building it imports nothing, and looking a member up imports only the one submodule
 # that defines it. Static typing is enabled by importing all submodules in a
-# type-checking only block.
+# type-checking only block (which is skipped at runtime).
 #
 # 2. Kernel attributes
 # --------------------
 #
 # Kernel attributes read and write values of the C++ nest kernel. They are declared as
 # static type hints, which `_install_kernel_attributes` turns into descriptors on the
-# `NestModule` type; `NestModule.__setattr__` routes assignment to them.
+# `NestModule` type, so that reading and writing `nest.<name>` reads and writes the
+# kernel status.
 #
 # The layout of the file follows those two halves: it begins with the regular import
-# statements, then the static declarations -- the type-checking block for (1) and the
-# kernel attribute type hints for (2) -- then the `NestModule` type that gives them
+# statements, then the static declarations (the type-checking block for (1) and the
+# kernel attribute type hints for (2)), then the `NestModule` type that gives them
 # their dynamic behaviour, and it ends by retyping the module object.
 #
 # pylint: disable=wildcard-import, unused-wildcard-import, no-name-in-module, invalid-name
@@ -88,8 +91,8 @@ from .ll_api import KernelAttribute, set_communicator  # noqa: F401
 if typing.TYPE_CHECKING:
     # Static analysis has no way to follow `NestModule.__getattr__`, so the namespace it
     # builds at runtime is spelled out here for the benefit of type checkers and IDEs.
-    # Nothing reads this block at runtime -- the runtime discovers both the submodules and
-    # the `hl_api` modules from the package directory -- so a stale entry costs type
+    # Nothing reads this block at runtime, since the runtime discovers both the submodules
+    # and the `hl_api` modules from the package directory, so a stale entry costs type
     # information, never correctness. `test_api_surface.py` fails if the two drift apart.
     from . import (  # noqa: F401
         ll_api,
@@ -509,11 +512,13 @@ class NestModule(types.ModuleType):
 
     def __setattr__(self, attr, value):
         """
-        Route assignment to the descriptor of the same name on `NestModule`, so that
-        `nest.resolution = 0.1` reaches the kernel instead of shadowing the descriptor
-        with an entry in the module dictionary. Names without such a descriptor cannot
-        be assigned; the module namespace is a curated API, not a scratch pad. Use
-        `nest.userdict` to attach data of your own.
+        Refuse to assign a name that no descriptor on `NestModule` claims: the module
+        namespace is a curated API, not a scratch pad. Use `nest.userdict` to attach
+        data of your own.
+
+        Writing a kernel attribute needs nothing from this method. `object.__setattr__`
+        finds the `KernelAttribute` on the type and calls its `__set__`, which is what
+        carries the value to the kernel.
         """
         # Imported here to keep `types` out of the `nest` namespace.
         import types
@@ -526,7 +531,7 @@ class NestModule(types.ModuleType):
         descriptor = getattr(type(self), attr, None)
         if descriptor is None or not hasattr(descriptor, "__set__"):
             raise AttributeError(f"Cannot set attribute '{attr}' on module 'nest'")
-        descriptor.__set__(self, value)
+        super().__setattr__(attr, value)
 
     userdict = {}
     """

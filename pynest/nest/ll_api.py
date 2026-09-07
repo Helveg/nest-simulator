@@ -93,7 +93,7 @@ class KernelAttribute:
     Parameters
     ----------
     description : str
-        What the attribute means, as one reStructuredText paragraph -- it is what
+        What the attribute means, as one reStructuredText paragraph. It is what
         ``help()`` and the :ref:`sec_kernel_attributes` page show. Indentation is
         stripped, so a triple-quoted string indented to match the surrounding code
         renders correctly. A trailing period is optional; one is always rendered.
