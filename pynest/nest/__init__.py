@@ -436,56 +436,54 @@ class NestModule(types.ModuleType):
         is read from the sources, so building it imports nothing and resolving a name
         imports only the one module that owns it. The ``*_helper`` modules are internal
         and are skipped, as they are by the documentation build.
+
+        `os` rather than `pathlib`, because `nest` has already imported the one and
+        importing the other costs more than the whole map build.
         """
 
-        import pathlib
+        import os
 
         if NestModule._symbol_map is None:
             symbols = {}
-            for path in sorted(pathlib.Path(self.__path__[0], "lib").glob("hl_api_*.py")):
-                if "helper" not in path.name:
-                    module = f".lib.{path.stem}"
-                    symbols.update((name, module) for name in self._exported_names(path.read_text()))
+            lib = os.path.join(self.__path__[0], "lib")
+            for filename in sorted(os.listdir(lib)):
+                if filename.startswith("hl_api_") and filename.endswith(".py") and "helper" not in filename:
+                    module = f".lib.{filename[:-len('.py')]}"
+                    with open(os.path.join(lib, filename), encoding="utf-8") as source:
+                        symbols.update((name, module) for name in self._exported_names(source.read()))
             NestModule._symbol_map = symbols
         return NestModule._symbol_map
 
     def _exported_names(self, source):
         """
-        The names that `source` declares in its ``__all__``, which is a list of string
-        literals in every `hl_api` module.
+        The names that `source` declares in its ``__all__``.
 
-        `tokenize` is the lexer that Python itself uses, so this runs the real tokenizer
-        over the ``__all__`` declaration without ever building an AST of the file. Two
-        things follow from that. It reads the source the way Python does, so a bracket
-        inside a comment or a string arrives as part of a ``COMMENT`` or ``STRING``
-        token and can never be mistaken for the end of the list. And it is a generator
-        over `readline`, so it stops at the closing bracket instead of reading the rest
-        of the module, which is what makes building the whole map cost a few
-        milliseconds rather than the tens that parsing nine files in full would.
+        In every `hl_api` module that declaration is a plain list of string literals, so
+        it is matched directly instead of parsing or tokenizing the module, which is
+        what keeps building the whole map to well under a millisecond. Two details do
+        the work of a parser. The anchor is `__all__ = [` at the start of a line, which
+        prose in a docstring cannot satisfy. And comments go before the closing bracket
+        is looked for, so a bracket written inside one cannot end the list early.
+
+        A declaration this does not understand yields fewer names, never different ones,
+        because only quoted words between the brackets are read. `test_api_surface.py`
+        checks the map against what the modules really export, so a declaration that
+        outgrows this fails the test suite rather than `nest` itself.
         """
 
-        import ast
-        import io
-        import tokenize
+        import re
 
-        names = []
-        depth = 0
-        found = False
-        for token in tokenize.generate_tokens(io.StringIO(source).readline):
-            if not found:
-                # Column 0, because the declaration `nest` reads is a module-level one.
-                found = token.type == tokenize.NAME and token.string == "__all__" and token.start[1] == 0
-            elif token.type == tokenize.OP and token.string in "[]":
-                # Only an `OP` bracket is punctuation; one in a comment or a string is
-                # part of that token, so the nesting count cannot drift.
-                depth += 1 if token.string == "[" else -1
-                if depth == 0:
-                    break
-            elif token.type == tokenize.STRING:
-                # `literal_eval` unquotes the one token, escapes and prefixes included.
-                names.append(ast.literal_eval(token.string))
+        opening = re.search(r"^__all__\s*=\s*\[", source, re.MULTILINE)
+        if opening is None:
+            return []
 
-        return names
+        # An exported name holds no `#`, so every `#` that is left starts a comment.
+        body = re.sub(r"#.*", "", source[opening.end() :])
+        closing = body.find("]")
+        if closing == -1:
+            return []
+
+        return re.findall(r"[\"'](\w+)[\"']", body[:closing])
 
     def set(self, **kwargs):
         "Forward kernel attribute setting to `SetKernelStatus()`."
