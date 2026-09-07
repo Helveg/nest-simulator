@@ -193,8 +193,7 @@ def init(argv):
 
     if not quiet:
         build_info = nestkernel.llapi_get_kernel_status()["build_info"]
-        print(
-            f"""
+        print(f"""
              -- N E S T --
 
  Copyright (C) 2004 The NEST Initiative
@@ -209,8 +208,7 @@ def init(argv):
    Visit https://www.nest-simulator.org
 
  Type 'nest.help()' to find out more about NEST.
-"""
-        )
+""")
 
     # Dirty hack to get tab-completion for models in IPython.
     try:
