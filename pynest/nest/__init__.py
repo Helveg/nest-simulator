@@ -40,23 +40,40 @@ r"""PyNEST - Python interface for the NEST Simulator
 For more information visit https://www.nest-simulator.org.
 """
 
-# `nest` is more than a namespace. Kernel attributes such as `nest.resolution` read
-# from and write to the running kernel, which takes descriptors, and descriptors only
-# fire when they are found on an object's *type*. So at the bottom of this file the
-# module object is given the `NestModule` type defined below (PEP 562). Retyping the
-# module object the interpreter already created -- rather than replacing it -- keeps
-# `import nest` pointing at one and the same object everywhere, including inside the
-# compiled `nestkernel_api` extension and inside the `hl_api` modules.
+# The `nest` module is a container of lazily imported submodules, lazily loaded
+# attribute shortcuts to said submodules, and kernel attributes (which read and write
+# kernel values). The dynamic behaviour of the module is achieved by retyping this
+# module object to the `NestModule` type defined below (see PEP 562). There are two
+# main dynamic behaviours:
 #
-# Having a type also means `nest` can have a `__getattr__`, so nothing beyond the
-# kernel itself has to be imported until a script reaches for it:
+# 1. Submodule attribute shortcuts
+# --------------------------------
 #
-#   * `nest.Create` and the rest of the API are resolved, on first access, from
-#     whichever `lib/hl_api_*` module exports them;
-#   * `nest.spatial`, `nest.random` and the other submodules are imported on first
-#     access, and are discovered from the package directory rather than listed;
-#   * the kernel attributes are declared as annotations at the bottom of this file and
-#     turned into descriptors by `_install_kernel_attributes`.
+# All the public attributes of the nest submodules are directly available on the nest
+# module itself:
+#
+#     import nest
+#
+#     nest.Create(...)
+#
+# This is achieved by a `__getattr__` method on the `NestModule`, backed by a symbol
+# map between the public interface members that the submodules declare in their
+# `__all__` and the submodule that defines them. The map is read from the sources, so
+# building it imports nothing, and looking a member up imports only the one submodule
+# that defines it. Static typing is enabled by importing all submodules in a
+# type-checking only block.
+#
+# 2. Kernel attributes
+# --------------------
+#
+# Kernel attributes read and write values of the C++ nest kernel. They are declared as
+# static type hints, which `_install_kernel_attributes` turns into descriptors on the
+# `NestModule` type; `NestModule.__setattr__` routes assignment to them.
+#
+# The layout of the file follows those two halves: it begins with the regular import
+# statements, then the static declarations -- the type-checking block for (1) and the
+# kernel attribute type hints for (2) -- then the `NestModule` type that gives them
+# their dynamic behaviour, and it ends by retyping the module object.
 #
 # pylint: disable=wildcard-import, unused-wildcard-import, no-name-in-module, invalid-name
 
@@ -104,166 +121,6 @@ except ImportError:
 
 NESTErrors = _ll_api.nestkernel.NESTErrors
 NESTError = _ll_api.nestkernel.NESTErrors.KernelException
-
-
-class NestModule(types.ModuleType):
-    """
-    Type of the ``nest`` root module.
-
-    The kernel attributes below are descriptors: reading ``nest.<attribute>`` reads the
-    status of the running NEST kernel and assigning to it writes that status.
-    Descriptors are only honoured when they live on a type, which is why the ``nest``
-    module object is given this type rather than plain ``ModuleType``.
-    """
-
-    # Submodules that `nest` uses to reach the kernel or that only matter during
-    # start-up. They stay reachable, but `nest` does not advertise them.
-    _PRIVATE_SUBMODULES = frozenset({"lib", "nestkernel_api", "versionchecker"})
-
-    # Filled in by `_submodules()` on first use.
-    _submodule_names = None
-
-    def _submodules(self):
-        """Names of the submodules `nest` exposes, read from the package directory."""
-
-        import pkgutil
-
-        if NestModule._submodule_names is None:
-            NestModule._submodule_names = frozenset(
-                name
-                for _, name, _ in pkgutil.iter_modules(self.__path__)
-                if not name.startswith("_") and name not in NestModule._PRIVATE_SUBMODULES
-            )
-        return NestModule._submodule_names
-
-    def _api_modules(self):
-        """
-        Yield the ``lib.hl_api_*`` modules whose public API `nest` re-exports, importing
-        them one at a time so that a lookup stops as soon as it has found its name. The
-        ``*_helper`` modules are internal and are skipped, as they are by the
-        documentation build.
-        """
-
-        import importlib
-        import pkgutil
-
-        lib = importlib.import_module(".lib", __name__)
-        names = sorted(name for _, name, _ in pkgutil.iter_modules(lib.__path__))
-        for name in names:
-            if name.startswith("hl_api_") and "helper" not in name:
-                yield importlib.import_module(f".lib.{name}", __name__)
-
-    def set(self, **kwargs):
-        "Forward kernel attribute setting to `SetKernelStatus()`."
-        return self.SetKernelStatus(kwargs)
-
-    def get(self, *args):
-        "Forward kernel attribute getting to `GetKernelStatus()`."
-        if not args:
-            return self.GetKernelStatus()
-        if len(args) == 1:
-            return self.GetKernelStatus(args[0])
-        return self.GetKernelStatus(args)
-
-    def __dir__(self):
-        # `__all__` first: building it caches it in the module dictionary, so that the
-        # `vars(self)` below sees it.
-        api = set(self.__all__)
-        return list(api | {name for name in vars(self) if name not in NestModule._PRIVATE_SUBMODULES})
-
-    def __getattr__(self, attr):
-        """
-        Resolve a name that `nest` exposes but has not imported yet: one of its
-        submodules, or one of the names re-exported from a ``lib.hl_api_*`` module. The
-        `hl_api` modules are imported one by one until one declares the name in its
-        ``__all__``; the result is cached in the module dictionary, so this runs once
-        per name.
-
-        `__all__` is built the same way, by importing all of them; that makes
-        `dir(nest)`, `help(nest)` and `from nest import *` complete, at the cost of
-        giving up laziness -- which is what those three ask for anyway.
-        """
-        import importlib
-
-        if attr == "__all__":
-            api = {name for name in vars(self) if not name.startswith("_")}
-            api |= {name for name in dir(type(self)) if not name.startswith("_")}
-            api |= self._submodules()
-            for module in self._api_modules():
-                api |= set(module.__all__)
-            # `NestModule` is reachable as `nest.NestModule` for the documentation
-            # build, but it is machinery rather than API.
-            api -= NestModule._PRIVATE_SUBMODULES | {"NestModule"}
-            self.__dict__["__all__"] = sorted(api)
-            return self.__dict__["__all__"]
-
-        if not attr.startswith("_"):
-            if attr in self._submodules():
-                module = importlib.import_module("." + attr, __name__)
-                self.__dict__[attr] = module
-                return module
-
-            for module in self._api_modules():
-                if attr in module.__all__:
-                    value = getattr(module, attr)
-                    self.__dict__[attr] = value
-                    return value
-
-        raise AttributeError(f"module {__name__!r} has no attribute {attr!r}")
-
-    def __setattr__(self, attr, value):
-        """
-        Route assignment to the descriptor of the same name on `NestModule`, so that
-        `nest.resolution = 0.1` reaches the kernel instead of shadowing the descriptor
-        with an entry in the module dictionary. Names without such a descriptor cannot
-        be assigned; the module namespace is a curated API, not a scratch pad. Use
-        `nest.userdict` to attach data of your own.
-        """
-        # Imported here to keep `types` out of the `nest` namespace.
-        import types
-
-        if isinstance(value, types.ModuleType):
-            # The import machinery attaches submodules to their parent package.
-            self.__dict__[attr] = value
-            return
-
-        descriptor = getattr(type(self), attr, None)
-        if descriptor is None or not hasattr(descriptor, "__set__"):
-            raise AttributeError(f"Cannot set attribute '{attr}' on module 'nest'")
-        descriptor.__set__(self, value)
-
-    userdict = {}
-    """
-    The variable userdict allows users to store custom data with the NEST kernel.
-
-    Example: nest.userdict["nodes"] = [1,2,3,4]
-    """
-
-
-def _install_kernel_attributes(cls, annotations):
-    """
-    Turn the ``Annotated[<type>, KernelAttribute(...)]`` declarations below into
-    descriptors on `cls`, and record their names for `SetKernelStatus()` to validate
-    against.
-
-    The annotation is the whole declaration of a kernel attribute: its type is what
-    static analysis reports for ``nest.<name>`` and what the ``:type:`` field of the
-    generated docstring shows, and its metadata carries description and defaults.
-    """
-
-    attributes = {}
-    for name, annotation in annotations.items():
-        metadata = getattr(annotation, "__metadata__", ())
-        attribute = next((meta for meta in metadata if isinstance(meta, KernelAttribute)), None)  # noqa: F405
-        if attribute is None:
-            continue
-        attribute.bind(name, typing.get_args(annotation)[0])  # noqa: F405
-        setattr(cls, name, attribute)
-        attributes[name] = attribute
-
-    # Kernel attribute indices, used for fast lookup in `lib/hl_api_simulation.py`
-    cls._kernel_attr_names = frozenset(attributes)
-    cls._readonly_kernel_attrs = frozenset(name for name, a in attributes.items() if a.readonly)
 
 
 # Define the kernel attributes.
@@ -536,6 +393,174 @@ verbosity: Annotated[
         default=_ll_api.nestkernel.VerbosityLevel.INFO,
     ),
 ]
+
+
+class NestModule(types.ModuleType):
+    """
+    Type of the ``nest`` root module.
+
+    The kernel attributes are descriptors: reading ``nest.<attribute>`` reads the
+    status of the running NEST kernel and assigning to it writes that status.
+    Descriptors are only honoured when they live on a type, which is why the ``nest``
+    module object is given this type rather than plain ``ModuleType``.
+    """
+
+    # Submodules that `nest` uses to reach the kernel or that only matter during
+    # start-up. They stay reachable, but `nest` does not advertise them.
+    _PRIVATE_SUBMODULES = frozenset({"lib", "nestkernel_api", "versionchecker"})
+
+    # Filled in on first use by `_submodules()` and `_symbols()`.
+    _submodule_names = None
+    _symbol_map = None
+
+    def _submodules(self):
+        """Names of the submodules `nest` exposes, read from the package directory."""
+
+        import pkgutil
+
+        if NestModule._submodule_names is None:
+            NestModule._submodule_names = frozenset(
+                name
+                for _, name, _ in pkgutil.iter_modules(self.__path__)
+                if not name.startswith("_") and name not in NestModule._PRIVATE_SUBMODULES
+            )
+        return NestModule._submodule_names
+
+    def _symbols(self):
+        """
+        Map each name that the ``lib.hl_api_*`` modules export onto the module that
+        exports it. The map is read from the sources with `ast`, so building it imports
+        nothing and a lookup imports only the one module it resolves to. The
+        ``*_helper`` modules are internal and are skipped, as they are by the
+        documentation build.
+        """
+
+        import ast
+        import pathlib
+
+        if NestModule._symbol_map is None:
+            symbols = {}
+            for path in sorted(pathlib.Path(self.__path__[0], "lib").glob("hl_api_*.py")):
+                if "helper" in path.name:
+                    continue
+                module = f".lib.{path.stem}"
+                for node in ast.parse(path.read_text()).body:
+                    if isinstance(node, ast.Assign) and any(
+                        isinstance(target, ast.Name) and target.id == "__all__" for target in node.targets
+                    ):
+                        # In every `hl_api` module `__all__` is a list of string literals.
+                        symbols.update((element.value, module) for element in node.value.elts)
+                        break
+            NestModule._symbol_map = symbols
+        return NestModule._symbol_map
+
+    def set(self, **kwargs):
+        "Forward kernel attribute setting to `SetKernelStatus()`."
+        return self.SetKernelStatus(kwargs)
+
+    def get(self, *args):
+        "Forward kernel attribute getting to `GetKernelStatus()`."
+        if not args:
+            return self.GetKernelStatus()
+        if len(args) == 1:
+            return self.GetKernelStatus(args[0])
+        return self.GetKernelStatus(args)
+
+    def __dir__(self):
+        # `__all__` first: building it caches it in the module dictionary, so that the
+        # `vars(self)` below sees it.
+        api = set(self.__all__)
+        return list(api | {name for name in vars(self) if name not in NestModule._PRIVATE_SUBMODULES})
+
+    def __getattr__(self, attr):
+        """
+        Resolve a name that `nest` exposes but has not imported yet: one of its
+        submodules, or one of the names that a ``lib.hl_api_*`` module exports. The
+        symbol map names the module that defines it, so only that one module is
+        imported. The result is cached in the module dictionary, so this runs once per
+        name.
+        """
+        import importlib
+
+        if attr == "__all__":
+            api = {name for name in vars(self) if not name.startswith("_")}
+            api |= {name for name in dir(type(self)) if not name.startswith("_")}
+            api |= self._submodules()
+            api |= set(self._symbols())
+            # `NestModule` is reachable as `nest.NestModule` for the documentation
+            # build, but it is machinery rather than API.
+            api -= NestModule._PRIVATE_SUBMODULES | {"NestModule"}
+            self.__dict__["__all__"] = sorted(api)
+            return self.__dict__["__all__"]
+
+        if not attr.startswith("_"):
+            if attr in self._submodules():
+                module = importlib.import_module("." + attr, __name__)
+                self.__dict__[attr] = module
+                return module
+
+            module = self._symbols().get(attr)
+            if module is not None:
+                value = getattr(importlib.import_module(module, __name__), attr)
+                self.__dict__[attr] = value
+                return value
+
+        raise AttributeError(f"module {__name__!r} has no attribute {attr!r}")
+
+    def __setattr__(self, attr, value):
+        """
+        Route assignment to the descriptor of the same name on `NestModule`, so that
+        `nest.resolution = 0.1` reaches the kernel instead of shadowing the descriptor
+        with an entry in the module dictionary. Names without such a descriptor cannot
+        be assigned; the module namespace is a curated API, not a scratch pad. Use
+        `nest.userdict` to attach data of your own.
+        """
+        # Imported here to keep `types` out of the `nest` namespace.
+        import types
+
+        if isinstance(value, types.ModuleType):
+            # The import machinery attaches submodules to their parent package.
+            self.__dict__[attr] = value
+            return
+
+        descriptor = getattr(type(self), attr, None)
+        if descriptor is None or not hasattr(descriptor, "__set__"):
+            raise AttributeError(f"Cannot set attribute '{attr}' on module 'nest'")
+        descriptor.__set__(self, value)
+
+    userdict = {}
+    """
+    The variable userdict allows users to store custom data with the NEST kernel.
+
+    Example: nest.userdict["nodes"] = [1,2,3,4]
+    """
+
+
+def _install_kernel_attributes(cls, annotations):
+    """
+    Turn the ``Annotated[<type>, KernelAttribute(...)]`` declarations above into
+    descriptors on `cls`, and record their names for `SetKernelStatus()` to validate
+    against.
+
+    The annotation is the whole declaration of a kernel attribute: its type is what
+    static analysis reports for ``nest.<name>`` and what the ``:type:`` field of the
+    generated docstring shows, and its metadata carries description and defaults.
+    """
+
+    attributes = {}
+    for name, annotation in annotations.items():
+        metadata = getattr(annotation, "__metadata__", ())
+        attribute = next((meta for meta in metadata if isinstance(meta, KernelAttribute)), None)  # noqa: F405
+        if attribute is None:
+            continue
+        attribute.bind(name, typing.get_args(annotation)[0])  # noqa: F405
+        setattr(cls, name, attribute)
+        attributes[name] = attribute
+
+    # Kernel attribute indices, used for fast lookup in `lib/hl_api_simulation.py`
+    cls._kernel_attr_names = frozenset(attributes)
+    cls._readonly_kernel_attrs = frozenset(name for name, a in attributes.items() if a.readonly)
+
 
 _install_kernel_attributes(NestModule, __annotations__)
 

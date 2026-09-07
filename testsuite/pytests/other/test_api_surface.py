@@ -22,11 +22,11 @@
 """
 Tests for the namespace of the ``nest`` root module.
 
-``nest`` resolves its namespace lazily: submodules and the public API of the
-``lib.hl_api_*`` modules are imported on first access by ``NestModule.__getattr__``,
-which discovers both from the package directory. Static analysers cannot follow that,
-so ``nest/__init__.py`` spells the same namespace out in an ``if TYPE_CHECKING:``
-block. Nothing reads that block at runtime, which is exactly why it needs a test.
+``nest`` resolves its namespace lazily: submodules are imported on first access by
+``NestModule.__getattr__``, and so are the ``lib.hl_api_*`` modules, through a symbol
+map that the module reads from the sources. Static analysers cannot follow that, so
+``nest/__init__.py`` spells the same namespace out in an ``if TYPE_CHECKING:`` block.
+Nothing reads that block at runtime, which is exactly why it needs a test.
 """
 
 import ast
@@ -65,23 +65,28 @@ def test_type_checking_block_lists_every_submodule():
 
 
 def test_type_checking_block_lists_every_api_module():
-    """The TYPE_CHECKING block must cover the `hl_api` modules the runtime searches."""
+    """The TYPE_CHECKING block must cover the `hl_api` modules the symbol map draws from."""
 
     _, declared = _type_checking_imports()
-    assert declared == {module.__name__.rsplit(".", 1)[1] for module in nest._api_modules()}
+    assert declared == {module.rsplit(".", 1)[1] for module in nest._symbols().values()}
 
 
-def test_api_module_exports_are_disjoint():
+def test_symbol_map_matches_the_imported_modules():
     """
-    `NestModule.__getattr__` returns the first `hl_api` module that exports a name, so
-    two modules exporting the same name would make the lookup order significant.
+    The symbol map is read from the sources without importing them, so it can disagree
+    with what the modules export once imported. It must not: a name missing from the
+    map does not resolve on `nest`, and a name mapped to the wrong module resolves to
+    the wrong object.
     """
 
-    seen = {}
-    for module in nest._api_modules():
+    mapped = {}
+    for module_name in set(nest._symbols().values()):
+        module = importlib.import_module(module_name, "nest")
         for name in module.__all__:
-            assert name not in seen, f"'{name}' is exported by both {seen[name]} and {module.__name__}"
-            seen[name] = module.__name__
+            assert name not in mapped, f"'{name}' is exported by both {mapped[name]} and {module_name}"
+            mapped[name] = module_name
+
+    assert nest._symbols() == mapped
 
 
 def test_all_covers_the_lazily_resolved_namespace():
