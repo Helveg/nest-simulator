@@ -452,28 +452,40 @@ class NestModule(types.ModuleType):
     def _exported_names(self, source):
         """
         The names that `source` declares in its ``__all__``, which is a list of string
-        literals in every `hl_api` module. Only that one statement is parsed, at a
-        fraction of the cost of parsing the module: the statement runs from the line
-        opening ``__all__`` to the line that closes its bracket, counted over the code
-        of each line so that a comment between the names cannot throw the count off.
+        literals in every `hl_api` module.
+
+        `tokenize` is the lexer that Python itself uses, so this runs the real tokenizer
+        over the ``__all__`` declaration without ever building an AST of the file. Two
+        things follow from that. It reads the source the way Python does, so a bracket
+        inside a comment or a string arrives as part of a ``COMMENT`` or ``STRING``
+        token and can never be mistaken for the end of the list. And it is a generator
+        over `readline`, so it stops at the closing bracket instead of reading the rest
+        of the module, which is what makes building the whole map cost a few
+        milliseconds rather than the tens that parsing nine files in full would.
         """
 
         import ast
+        import io
+        import tokenize
 
-        lines = source.splitlines()
-        start = next((i for i, line in enumerate(lines) if line.startswith("__all__")), None)
-        if start is None:
-            return ()
-
+        names = []
         depth = 0
-        for stop, line in enumerate(lines[start:], start + 1):
-            code = line.split("#")[0]
-            depth += code.count("[") - code.count("]")
-            if depth == 0:
-                break
+        found = False
+        for token in tokenize.generate_tokens(io.StringIO(source).readline):
+            if not found:
+                # Column 0, because the declaration `nest` reads is a module-level one.
+                found = token.type == tokenize.NAME and token.string == "__all__" and token.start[1] == 0
+            elif token.type == tokenize.OP and token.string in "[]":
+                # Only an `OP` bracket is punctuation; one in a comment or a string is
+                # part of that token, so the nesting count cannot drift.
+                depth += 1 if token.string == "[" else -1
+                if depth == 0:
+                    break
+            elif token.type == tokenize.STRING:
+                # `literal_eval` unquotes the one token, escapes and prefixes included.
+                names.append(ast.literal_eval(token.string))
 
-        statement = ast.parse("\n".join(lines[start:stop]))
-        return tuple(element.value for element in statement.body[0].value.elts)
+        return names
 
     def set(self, **kwargs):
         "Forward kernel attribute setting to `SetKernelStatus()`."
