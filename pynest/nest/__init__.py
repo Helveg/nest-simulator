@@ -45,8 +45,8 @@ For more information visit https://www.nest-simulator.org.
 # kernel values). The dynamic behaviour of the module is achieved by retyping this
 # module object to the `NestModule` type defined below. Assigning a module's
 # `__class__` is supported for exactly this purpose since Python 3.5; see
-# https://docs.python.org/3/reference/datamodel.html#customizing-module-attribute-access.
-# There are two main dynamic behaviours:
+# https://docs.python.org/3/reference/datamodel.html#module.__class__. There are two
+# main dynamic behaviours:
 #
 # 1. Submodule attribute shortcuts
 # --------------------------------
@@ -432,30 +432,48 @@ class NestModule(types.ModuleType):
     def _symbols(self):
         """
         Map each name that the ``lib.hl_api_*`` modules export onto the module that
-        exports it. The map is read from the sources with `ast`, so building it imports
-        nothing and a lookup imports only the one module it resolves to. The
-        ``*_helper`` modules are internal and are skipped, as they are by the
-        documentation build.
+        exports it. The whole map is built on first use and kept on the class, and it
+        is read from the sources, so building it imports nothing and resolving a name
+        imports only the one module that owns it. The ``*_helper`` modules are internal
+        and are skipped, as they are by the documentation build.
         """
 
-        import ast
         import pathlib
 
         if NestModule._symbol_map is None:
             symbols = {}
             for path in sorted(pathlib.Path(self.__path__[0], "lib").glob("hl_api_*.py")):
-                if "helper" in path.name:
-                    continue
-                module = f".lib.{path.stem}"
-                for node in ast.parse(path.read_text()).body:
-                    if isinstance(node, ast.Assign) and any(
-                        isinstance(target, ast.Name) and target.id == "__all__" for target in node.targets
-                    ):
-                        # In every `hl_api` module `__all__` is a list of string literals.
-                        symbols.update((element.value, module) for element in node.value.elts)
-                        break
+                if "helper" not in path.name:
+                    module = f".lib.{path.stem}"
+                    symbols.update((name, module) for name in self._exported_names(path.read_text()))
             NestModule._symbol_map = symbols
         return NestModule._symbol_map
+
+    def _exported_names(self, source):
+        """
+        The names that `source` declares in its ``__all__``, which is a list of string
+        literals in every `hl_api` module. Only that one statement is parsed, at a
+        fraction of the cost of parsing the module: the statement runs from the line
+        opening ``__all__`` to the line that closes its bracket, counted over the code
+        of each line so that a comment between the names cannot throw the count off.
+        """
+
+        import ast
+
+        lines = source.splitlines()
+        start = next((i for i, line in enumerate(lines) if line.startswith("__all__")), None)
+        if start is None:
+            return ()
+
+        depth = 0
+        for stop, line in enumerate(lines[start:], start + 1):
+            code = line.split("#")[0]
+            depth += code.count("[") - code.count("]")
+            if depth == 0:
+                break
+
+        statement = ast.parse("\n".join(lines[start:stop]))
+        return tuple(element.value for element in statement.body[0].value.elts)
 
     def set(self, **kwargs):
         "Forward kernel attribute setting to `SetKernelStatus()`."
